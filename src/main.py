@@ -3,7 +3,7 @@ import wandb
 import os
 
 import torch
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from transformers import BertTokenizerFast
 
 from .train import Trainer
 from .data_module import BaseDataModule
@@ -53,7 +53,7 @@ def main():
     seed_everything(args.seed)
     args_save = vars(args)
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model_path)
+    tokenizer = BertTokenizerFast.from_pretrained(args.model_path)
     model = AutoModelForSequenceClassification.from_pretrained(args.model_path)
     data_module = BaseDataModule(args, tokenizer)
     train_dataloader, dev_dataloader = data_module.create_dataloader()

@@ -1,4 +1,4 @@
-from transformers import PreTrainedModel
+from transformers import PreTrainedModel, BertModel
 
 
 class MyBert(PreTrainedModel):
@@ -9,3 +9,10 @@ class MyBert(PreTrainedModel):
 
     def forward(self):
         raise NotImplementedError
+
+
+class BertWithCRF(BertModel):
+    
+    def __init__(self, config):
+        super().__init__(config, add_pooling_layer=False)
+        pass

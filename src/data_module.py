@@ -1,8 +1,6 @@
-from cProfile import label
 import os
 import pickle
 import logging
-from sklearn.linear_model import lasso_path
 from tqdm import tqdm
 from argparse import Namespace
 from dataclasses import dataclass
@@ -231,7 +229,6 @@ class MSRANERData(BaseDataModule):
         encoded_data = []
         for text, tag in tqdm(zip(texts, tags), desc='Encoding', total=len(texts)):
 
-            tag_ids = [self.label_mapping[t] for t in tag]
 
             inputs = self.tokenizer.encode_plus(
                 text,
@@ -240,7 +237,15 @@ class MSRANERData(BaseDataModule):
                 truncation=False,
                 return_token_type_ids=True,
                 return_attention_mask=False,
+                return_offsets_mapping=True
             )
+            
+            offset_mapping = inputs.offset_mapping[1:-1]
+            for offset in offset_mapping:
+                pass
+            
+            
+            tag_ids = [self.label_mapping[t] for t in tag]
 
             example = InputExample(
                 inputs.input_ids, inputs.token_type_ids, tag_ids)
