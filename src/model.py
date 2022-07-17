@@ -1,4 +1,3 @@
-from multiprocessing import reduction
 from transformers import PreTrainedModel, BertPreTrainedModel, BertModel
 from torchcrf import CRF
 import torch.nn as nn
