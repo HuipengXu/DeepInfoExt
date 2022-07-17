@@ -23,91 +23,8 @@ class InputExample:
 
     input_ids: list
     token_type_ids: list
-    label: Union[list, int]
+    labels: Union[list, int]
     raw_text: Optional[str] = None
-
-
-class BaseDataModule:
-    def __init__(
-        self,
-        args: Namespace,
-        tokenizer: PreTrainedTokenizer,
-    ):
-        self.args = args
-        self.tokenizer = tokenizer
-        self.label_mapping = None
-        self.train_cache = None
-        self.dev_cache = None
-        self.test_cache = None
-        self.train_cache_path = os.path.join(
-            self.args.data_dir, "train_data.pkl")
-        self.dev_cache_path = os.path.join(self.args.data_dir, "dev_data.pkl")
-        self.test_cache_path = os.path.join(
-            self.args.data_dir, "test_data.pkl")
-
-    def prepare(self, *args, **kwargs):
-        """预处理原始数据.
-
-        将原始文本编码为数值 id，分割成训练集和验证集，并进行缓存
-        """
-        raise NotImplementedError
-
-    def setup(self):
-        if self.args.overwrite or os.path.exists(self.train_cache_path):
-            self.prepare()
-        else:
-            self.from_pickle()
-
-    def create_dataloader(self):
-        """返回训练集和验证集的 DataLoader 对象."""
-        self.setup()
-        train_dataset = BaseDataset(self.train_cache)
-        dev_dataset = BaseDataset(self.dev_cache)
-        collator = Collator(self.args.max_seq_length, self.tokenizer)
-        train_dataloader = DataLoader(
-            dataset=train_dataset,
-            batch_size=self.args.batch_size,
-            shuffle=True,
-            num_workers=-1,
-            collate_fn=collator,
-        )
-        dev_dataloader = DataLoader(
-            dataset=dev_dataset,
-            batch_size=self.args.batch_size,
-            shuffle=False,
-            num_workers=-1,
-            collate_fn=collator,
-        )
-        return train_dataloader, dev_dataloader
-
-    @staticmethod
-    def pkl_dump(data: dict, data_path: str):
-        with open(data_path, "wb") as f:
-            pickle.dump(data, f)
-
-    @staticmethod
-    def pkl_load(data_path: str):
-        with open(data_path, "rb") as f:
-            data = pickle.load(f)
-        return data
-
-    def to_pickle(self):
-        self.pkl_dump(self.train_cache, self.train_cache_path)
-        self.pkl_dump(self.dev_cache, self.dev_cache_path)
-        if self.test_cache is not None:
-            self.pkl_dump(self.test_cache, self.test_cache_path)
-
-    def from_pickle(self):
-        assert not os.path.exists(
-            self.train_cache_path
-        ), "Train data cache doesn't exist, please run `prepare`"
-        assert not os.path.exists(
-            self.dev_cache_path
-        ), "Dev data cache doesn't exist, please run `prepare`"
-        self.train_cache = self.pkl_load(self.train_cache_path)
-        self.dev_cache = self.pkl_load(self.dev_cache_path)
-        if os.path.exists(self.test_cache_path):
-            self.test_cache = self.pkl_load(self.test_cache_path)
 
 
 class BaseDataset(Dataset):
@@ -133,11 +50,8 @@ class Collator:
         self.max_seq_len = max_seq_len
         self.tokenizer = tokenizer
 
-    def pad_and_truncate(
-        self, input_ids_list, token_type_ids_list, max_seq_len
-    ):
-        input_ids = torch.zeros(
-            (len(input_ids_list), max_seq_len), dtype=torch.long)
+    def pad_and_truncate(self, input_ids_list, token_type_ids_list, max_seq_len):
+        input_ids = torch.zeros((len(input_ids_list), max_seq_len), dtype=torch.long)
         token_type_ids = torch.zeros_like(input_ids)
         attention_mask = torch.zeros_like(input_ids)
         for i in range(len(input_ids_list)):
@@ -188,16 +102,100 @@ class Collator:
         return data_dict
 
 
+class BaseDataModule:
+    def __init__(
+        self,
+        args: Namespace,
+        tokenizer: PreTrainedTokenizer,
+    ):
+        self.args = args
+        self.tokenizer = tokenizer
+        self.label_mapping = None
+        self.train_cache = None
+        self.dev_cache = None
+        self.test_cache = None
+        self.train_cache_path = os.path.join(self.args.data_dir, "train_data.pkl")
+        self.dev_cache_path = os.path.join(self.args.data_dir, "dev_data.pkl")
+        self.test_cache_path = os.path.join(self.args.data_dir, "test_data.pkl")
+        self.setup()
+
+    def prepare(self, *args, **kwargs):
+        """预处理原始数据.
+
+        将原始文本编码为数值 id，分割成训练集和验证集，并进行缓存
+        """
+        raise NotImplementedError
+
+    def setup(self):
+        if self.args.overwrite or not os.path.exists(self.train_cache_path):
+            self.prepare()
+        else:
+            self.from_pickle()
+
+    def create_dataloader(
+        self, dataset: Dataset = BaseDataset, collator: Collator = Collator
+    ):
+        """返回训练集和验证集的 DataLoader 对象."""
+        train_dataset = dataset(self.train_cache)
+        dev_dataset = dataset(self.dev_cache)
+        train_dataloader = DataLoader(
+            dataset=train_dataset,
+            batch_size=self.args.batch_size,
+            shuffle=True,
+            num_workers=self.args.num_workers,
+            collate_fn=collator,
+        )
+        dev_dataloader = DataLoader(
+            dataset=dev_dataset,
+            batch_size=self.args.batch_size,
+            shuffle=False,
+            num_workers=self.args.num_workers,
+            collate_fn=collator,
+        )
+        return train_dataloader, dev_dataloader
+
+    @staticmethod
+    def pkl_dump(data: dict, data_path: str):
+        with open(data_path, "wb") as f:
+            pickle.dump(data, f)
+
+    @staticmethod
+    def pkl_load(data_path: str):
+        with open(data_path, "rb") as f:
+            data = pickle.load(f)
+        return data
+
+    def to_pickle(self):
+        self.pkl_dump(self.train_cache, self.train_cache_path)
+        self.pkl_dump(self.dev_cache, self.dev_cache_path)
+        if self.test_cache is not None:
+            self.pkl_dump(self.test_cache, self.test_cache_path)
+
+    def from_pickle(self):
+        assert os.path.exists(
+            self.train_cache_path
+        ), "Train data cache doesn't exist, please run `prepare`"
+        assert os.path.exists(
+            self.dev_cache_path
+        ), "Dev data cache doesn't exist, please run `prepare`"
+        self.train_cache = self.pkl_load(self.train_cache_path)
+        self.dev_cache = self.pkl_load(self.dev_cache_path)
+        if os.path.exists(self.test_cache_path):
+            self.test_cache = self.pkl_load(self.test_cache_path)
+
+
 class MSRANERData(BaseDataModule):
     def read_raw_data(self, file_path, num_examples=0):
         with open(file_path, "r", encoding="utf8") as f:
-            examples = f.read().split("\n\n")
+            examples = f.read().strip().split("\n\n")
             cnt = 0
             data = defaultdict(list)
-            assert len(examples) != num_examples, "Read data incorrectly"
+            assert (
+                len(examples) == num_examples
+            ), f"Read data incorrectly, {len(examples)}:{num_examples}"
 
             if self.args.debug:
-                examples = examples[:int(0.05 * len(examples))]
+                examples = examples[: int(0.05 * len(examples))]
 
             for ex in tqdm(
                 examples, desc="Preprocessing raw data", total=len(examples)
@@ -209,8 +207,8 @@ class MSRANERData(BaseDataModule):
                         word, tag = items
                     else:
                         cnt += 1
-                        word = "，"
-                        tag = items[0]
+                        word = items[0]
+                        tag = "O"
                     words.append(word)
                     tags.append(tag)
                 text = "".join(words)
@@ -220,15 +218,16 @@ class MSRANERData(BaseDataModule):
             return data
 
     def encode(self, data: dict):
-        texts = data['texts']
-        tags = data['tags']
+        texts = data["texts"]
+        tags = data["tags"]
 
         tag_set = set(t for tag in tags for t in tag)
-        self.label_mapping = {tag: i for i, tag in enumerate(tag_set)}
+        if not self.label_mapping:
+            self.label_mapping = {tag: i for i, tag in enumerate(tag_set)}
 
         encoded_data = []
-        for text, tag in tqdm(zip(texts, tags), desc='Encoding', total=len(texts)):
-
+        max_id = 0
+        for text, tag in tqdm(zip(texts, tags), desc="Encoding", total=len(texts)):
 
             inputs = self.tokenizer.encode_plus(
                 text,
@@ -237,27 +236,58 @@ class MSRANERData(BaseDataModule):
                 truncation=False,
                 return_token_type_ids=True,
                 return_attention_mask=False,
-                return_offsets_mapping=True
+                return_offsets_mapping=True,
             )
-            
-            offset_mapping = inputs.offset_mapping[1:-1]
-            for offset in offset_mapping:
-                pass
-            
-            
-            tag_ids = [self.label_mapping[t] for t in tag]
 
-            example = InputExample(
-                inputs.input_ids, inputs.token_type_ids, tag_ids)
+            offset_mapping = inputs.offset_mapping[1:-1]
+            merged_tag = []
+            for offset in offset_mapping:
+                span_tag = []
+                for i in range(offset[0], offset[-1]):
+                    if not span_tag:
+                        span_tag.append(tag[i])
+                    elif tag[i] != span_tag[-1]:
+                        span_tag.append(tag[i])
+                if len(span_tag) == 1:
+                    cur_tag = span_tag[0]
+                elif (
+                    len(span_tag) == 2
+                    and span_tag[0].startswith("B")
+                    and span_tag[-1].startswith("I")
+                ):
+                    cur_tag = span_tag[0]
+                else:
+                    logger.info(
+                        f"Entity is cut error: {text[:offset[0]]}-{text[offset[0]: offset[-1]]}-{text[offset[-1]:]}"
+                    )
+                    cur_tag = "O"
+
+                if (
+                    cur_tag.startswith("I")
+                    and len(merged_tag) > 0
+                    and merged_tag[-1] == "O"
+                ):
+                    cur_tag == "O"
+                merged_tag.append(cur_tag)
+
+            merged_tag = ["O"] + merged_tag + ["O"]
+            assert len(merged_tag) == len(
+                inputs.input_ids
+            ), "Label's length must be equal to input's length"
+
+            tag_ids = [self.label_mapping[t] for t in merged_tag]
+            max_id = max(max_id, max(tag_ids))
+
+            example = InputExample(inputs.input_ids, inputs.token_type_ids, tag_ids)
             encoded_data.append(example)
 
         return encoded_data
 
     def prepare(self):
-        train_data = self.read_raw_data(
-            self.args.train_data_path, num_examples=45000)
-        test_data = self.read_raw_data(
-            self.args.test_data_path, num_examples=3442)
+        train_data_path = os.path.join(self.args.data_dir, "msra_train_bio.txt")
+        test_data_path = os.path.join(self.args.data_dir, "msra_test_bio.txt")
+        train_data = self.read_raw_data(train_data_path, num_examples=45000)
+        test_data = self.read_raw_data(test_data_path, num_examples=3442)
 
         encoded_train_data = self.encode(train_data)
         self.test_cache = self.encode(test_data)
@@ -268,16 +298,21 @@ class MSRANERData(BaseDataModule):
         self.train_cache = encoded_train_data[num_dev_examples:]
 
         self.to_pickle()
-        logger.info('Data have been cached')
+        logger.info("Data have been cached")
 
 
 class MSRACollator(Collator):
-
-    def __init__(self, max_seq_len: int, tokenizer: PreTrainedTokenizer, label_mapping: dict):
+    def __init__(
+        self, max_seq_len: int, tokenizer: PreTrainedTokenizer, label_mapping: dict
+    ):
         super().__init__(max_seq_len, tokenizer)
         self.label_mapping = label_mapping
 
     def process_labels(self, labels: list, max_seq_len: Optional[int] = None):
-        labels = [label[:max_seq_len] if len(label) >= max_seq_len
-                  else label + [self.label_mapping['O']] for label in labels]
-        return torch.tensor(labels, dtype=torch.float)
+        labels = [
+            label[:max_seq_len]
+            if len(label) >= max_seq_len
+            else label + [self.label_mapping["O"]] * (max_seq_len - len(label))
+            for label in labels
+        ]
+        return torch.tensor(labels, dtype=torch.long)
