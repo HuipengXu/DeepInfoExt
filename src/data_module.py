@@ -14,6 +14,8 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from transformers import PreTrainedTokenizer
 
+from .utils import json_dump
+
 
 logger = logging.getLogger()
 
@@ -25,6 +27,7 @@ class InputExample:
     token_type_ids: list
     labels: Union[list, int]
     raw_text: Optional[str] = None
+    offsets: Optional[List[tuple]] = None
 
 
 class BaseDataset(Dataset):
@@ -133,26 +136,39 @@ class BaseDataModule:
             self.from_pickle()
 
     def create_dataloader(
-        self, dataset: Dataset = BaseDataset, collator: Collator = Collator
+        self,
+        dataset: Dataset = BaseDataset,
+        collator: Collator = Collator,
     ):
         """返回训练集和验证集的 DataLoader 对象."""
-        train_dataset = dataset(self.train_cache)
-        dev_dataset = dataset(self.dev_cache)
-        train_dataloader = DataLoader(
-            dataset=train_dataset,
-            batch_size=self.args.batch_size,
-            shuffle=True,
-            num_workers=self.args.num_workers,
-            collate_fn=collator,
-        )
-        dev_dataloader = DataLoader(
-            dataset=dev_dataset,
-            batch_size=self.args.batch_size,
-            shuffle=False,
-            num_workers=self.args.num_workers,
-            collate_fn=collator,
-        )
-        return train_dataloader, dev_dataloader
+        if self.args.do_train:
+            train_dataset = dataset(self.train_cache)
+            dev_dataset = dataset(self.dev_cache)
+            train_dataloader = DataLoader(
+                dataset=train_dataset,
+                batch_size=self.args.batch_size,
+                shuffle=True,
+                num_workers=self.args.num_workers,
+                collate_fn=collator,
+            )
+            dev_dataloader = DataLoader(
+                dataset=dev_dataset,
+                batch_size=self.args.batch_size,
+                shuffle=False,
+                num_workers=self.args.num_workers,
+                collate_fn=collator,
+            )
+            return train_dataloader, dev_dataloader
+        else:
+            test_dataset = dataset(self.test_cache)
+            test_dataloader = DataLoader(
+                dataset=test_dataset,
+                batch_size=self.args.batch_size,
+                shuffle=False,
+                num_workers=self.args.num_workers,
+                collate_fn=collator,
+            )
+            return test_dataloader
 
     @staticmethod
     def pkl_dump(data: dict, data_path: str):
@@ -214,20 +230,25 @@ class MSRANERData(BaseDataModule):
                 text = "".join(words)
                 data["texts"].append(text)
                 data["tags"].append(tags)
+                data["raw_examples"] = ex
             logger.info(f"Total have {cnt} blanks")
             return data
 
     def encode(self, data: dict):
         texts = data["texts"]
         tags = data["tags"]
+        raw_examples = data["raw_examples"]
 
         tag_set = set(t for tag in tags for t in tag)
         if not self.label_mapping:
             self.label_mapping = {tag: i for i, tag in enumerate(tag_set)}
+            label_mapping_path = os.path.join(self.args.data_dir, "label_mapping.json")
+            json_dump(label_mapping_path, self.label_mapping)
 
         encoded_data = []
-        max_id = 0
-        for text, tag in tqdm(zip(texts, tags), desc="Encoding", total=len(texts)):
+        for i, (text, tag) in tqdm(
+            enumerate(zip(texts, tags)), desc="Encoding", total=len(texts)
+        ):
 
             inputs = self.tokenizer.encode_plus(
                 text,
@@ -276,9 +297,14 @@ class MSRANERData(BaseDataModule):
             ), "Label's length must be equal to input's length"
 
             tag_ids = [self.label_mapping[t] for t in merged_tag]
-            max_id = max(max_id, max(tag_ids))
 
-            example = InputExample(inputs.input_ids, inputs.token_type_ids, tag_ids)
+            example = InputExample(
+                inputs.input_ids,
+                inputs.token_type_ids,
+                tag_ids,
+                raw_examples[i],
+                offset_mapping,
+            )
             encoded_data.append(example)
 
         return encoded_data

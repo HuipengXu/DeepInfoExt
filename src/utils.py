@@ -1,4 +1,5 @@
 import math
+import json
 import random
 
 import numpy as np
@@ -6,8 +7,18 @@ from sklearn.metrics import precision_recall_fscore_support, accuracy_score
 
 import torch
 import evaluate
-import seqeval
 from torch import nn as nn
+
+
+def json_load(path: str):
+    with open(path, 'r', encoding='utf8') as f:
+        result = json.load(f)
+    return result
+
+
+def json_dump(path: str, obj: dict):
+    with open(path, 'w', encoding='utf8') as f:
+        json.dump(obj, f)
 
 
 class LabelSmoothingLoss(nn.Module):
@@ -149,7 +160,8 @@ seqeval_evaluator = evaluate.load('seqeval')
 
 
 def get_seqeuence_labeling_metrics(y_true, y_pred):
-    results = seqeval_evaluator.compute(predictions=y_pred, references=y_true, scheme='IOB2')
+    results = seqeval_evaluator.compute(
+        predictions=y_pred, references=y_true, scheme='IOB2')
     return results['overall_precision'], results['overall_recall'], results['overall_f1'], results['overall_accuracy']
 
 

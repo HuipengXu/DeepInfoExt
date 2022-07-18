@@ -1,5 +1,4 @@
 import argparse
-from pandas import date_range
 import wandb
 import time
 import os
@@ -8,6 +7,7 @@ import torch
 from transformers import BertTokenizerFast, BertConfig
 
 from .train import Trainer
+from .predict import Predictor
 from .model import BertWithCRF
 from .utils import seed_everything
 from .data_module import MSRANERData, MSRACollator
@@ -15,13 +15,19 @@ from .data_module import MSRANERData, MSRACollator
 
 def get_args():
     parser = argparse.ArgumentParser(description="For training")
-    parser.add_argument("--debug", default=0, help="whether to debug", type=int)
-    parser.add_argument("--task_name", default="NER", help="task name", type=str)
-    parser.add_argument("--username", default="xuhuipeng", help="username", type=str)
+    parser.add_argument("--debug", default=0,
+                        help="whether to debug", type=int)
+    parser.add_argument("--do_train", default=1,
+                        help="train or test", type=int)
+    parser.add_argument("--task_name", default="NER",
+                        help="task name", type=str)
+    parser.add_argument("--username", default="xuhuipeng",
+                        help="username", type=str)
     parser.add_argument(
         "--overwrite", default=0, help="whether to process data from scratch", type=int
     )
     parser.add_argument("--model_path", default="ptms/rbt3", type=str)
+    parser.add_argument("--save_model_path", default="ptms/rbt3", type=str)
     parser.add_argument(
         "--data_dir", default="./data", type=str, required=False, help="Path to data."
     )
@@ -93,7 +99,8 @@ def get_args():
     parser.add_argument(
         "--ema", default=1, type=int, choices=[0, 1], help="whether to use EMA"
     )
-    parser.add_argument("--ema_decay", default=0.999, type=float, help="decay in EMA")
+    parser.add_argument("--ema_decay", default=0.999,
+                        type=float, help="decay in EMA")
     parser.add_argument(
         "--tau", default=1000, type=int, help="ema decay correction factor"
     )
@@ -111,24 +118,15 @@ def get_args():
     return args
 
 
-def main():
-    args = get_args()
-    if not torch.cuda.is_available():
-        args.ngpus = 0
-    else:
-        args.ngpus = torch.cuda.device_count()
-
-    seed_everything(args.seed)
+def do_train(args, collator, data_module):
     args_save = vars(args)
-
-    tokenizer = BertTokenizerFast.from_pretrained(args.model_path)
-    data_module = MSRANERData(args, tokenizer)
     config = BertConfig.from_pretrained(
         args.model_path, num_labels=len(data_module.label_mapping)
     )
     model = BertWithCRF.from_pretrained(args.model_path, config=config)
-    collator = MSRACollator(args.max_seq_length, tokenizer, data_module.label_mapping)
-    train_dataloader, dev_dataloader = data_module.create_dataloader(collator=collator)
+    
+    train_dataloader, dev_dataloader = data_module.create_dataloader(
+        collator=collator)
 
     wandb.init(
         project=args.task_name,
@@ -140,8 +138,36 @@ def main():
     args.output_dir = os.path.join(args.output_dir, run_name)
     os.makedirs(args.output_dir)
 
-    trainer = Trainer(args, model, train_dataloader, dev_dataloader, label_mapping=data_module.label_mapping)
+    trainer = Trainer(args, model, train_dataloader,
+                      dev_dataloader, label_mapping=data_module.label_mapping)
     trainer.train()
+    
+
+def do_predict(args, collator, data_module):
+    test_dataloader = data_module.create_dataloader(collator=collator)
+    predictor = Predictor(args, test_dataloader)
+    predictor.predict()
+
+
+def main():
+    args = get_args()
+    if not torch.cuda.is_available():
+        args.ngpus = 0
+    else:
+        args.ngpus = torch.cuda.device_count()
+
+    seed_everything(args.seed)
+
+    tokenizer = BertTokenizerFast.from_pretrained(args.model_path)
+    data_module = MSRANERData(args, tokenizer)
+    collator = MSRACollator(args.max_seq_length,
+                            tokenizer, data_module.label_mapping)
+    
+    if args.do_train:
+        do_train(args, collator, data_module)
+    else:
+        do_predict(args, collator, data_module)
+        
 
 
 if __name__ == "__main__":
