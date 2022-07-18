@@ -74,13 +74,13 @@ def get_args():
     )
     parser.add_argument(
         "--num_train_epochs",
-        default=3,
+        default=2,
         type=int,
         help="Total number of training epochs to perform.",
     )
     parser.add_argument(
         "--logging_steps",
-        default=50,
+        default=100,
         type=int,
         help="Total number of steps to log metrics",
     )
@@ -140,7 +140,7 @@ def main():
     args.output_dir = os.path.join(args.output_dir, run_name)
     os.makedirs(args.output_dir)
 
-    trainer = Trainer(args, model, train_dataloader, dev_dataloader)
+    trainer = Trainer(args, model, train_dataloader, dev_dataloader, label_mapping=data_module.label_mapping)
     trainer.train()
 
 

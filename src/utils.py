@@ -5,6 +5,8 @@ import numpy as np
 from sklearn.metrics import precision_recall_fscore_support, accuracy_score
 
 import torch
+import evaluate
+import seqeval
 from torch import nn as nn
 
 
@@ -115,7 +117,8 @@ class EMA:
         for name, param in self.model.named_parameters():
             if param.requires_grad:
                 assert name in self.shadow
-                new_average = (1.0 - decay) * param.data + decay * self.shadow[name]
+                new_average = (1.0 - decay) * param.data + \
+                    decay * self.shadow[name]
                 self.shadow[name] = new_average.clone()
 
     def apply_shadow(self):
@@ -133,12 +136,21 @@ class EMA:
         self.backup = {}
 
 
-def get_metrics(y_true, y_pred):
+def get_classification_metrics(y_true, y_pred):
     y_true = np.concatenate(y_true, axis=0)
     y_pred = np.concatenate(y_pred, axis=0)
-    p, r, f1, _ = precision_recall_fscore_support(y_true, y_pred, average='macro')
+    p, r, f1, _ = precision_recall_fscore_support(
+        y_true, y_pred, average='macro')
     acc = accuracy_score(y_true, y_pred)
     return p, r, f1, acc
+
+
+seqeval_evaluator = evaluate.load('seqeval')
+
+
+def get_seqeuence_labeling_metrics(y_true, y_pred):
+    results = seqeval_evaluator.compute(predictions=y_pred, references=y_true, scheme='IOB2')
+    return results['overall_precision'], results['overall_recall'], results['overall_f1'], results['overall_accuracy']
 
 
 def seed_everything(seed):

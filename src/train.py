@@ -1,4 +1,7 @@
 from argparse import Namespace
+from cProfile import label
+from operator import itemgetter
+from typing import Optional
 from tqdm import tqdm, trange
 import prettytable as pt
 import wandb
@@ -19,12 +22,16 @@ class Trainer:
         model: PreTrainedModel,
         train_dataloader: DataLoader,
         dev_dataloader: DataLoader,
+        label_mapping: Optional[dict] = None
     ):
         self.args = args
         self.model = model
         self.train_dataloader = train_dataloader
         self.dev_dataloader = dev_dataloader
         self.monitor_metric = 0.0
+        if label_mapping:
+            self.id2label = {id_: label for label,
+                             id_ in label_mapping.items()}
 
     @torch.no_grad()
     def evaluation(self):
@@ -37,7 +44,9 @@ class Trainer:
         )
 
         for batch in val_iterator:
-            labels.append(batch["labels"].numpy())
+            batch_labels = [[self.id2label[label] for label in label_seq]
+                            for label_seq in batch["labels"].numpy()]
+            labels.extend(batch_labels)
             batch_cuda = {
                 item: value.to(self.args.device) for item, value in list(batch.items())
             }
@@ -48,15 +57,25 @@ class Trainer:
                 loss = loss.mean()
 
             val_loss += loss.item()
-            predictions.append(probs.argmax(dim=-1).cpu().numpy())
+            batch_predictions = [[self.id2label[pred] for pred in pred_seq]
+                                 for pred_seq in probs.argmax(dim=-1).cpu().numpy()]
+            predictions.extend(batch_predictions)
 
         avg_val_loss = val_loss / len(self.dev_dataloader)
-        p, r, f1, acc = get_metrics(labels, predictions)
-        metrics = {"p": p, "r": r, "f1": f1, "acc": acc, "avg_val_loss": avg_val_loss}
+        p, r, f1, acc = get_seqeuence_labeling_metrics(labels, predictions)
+        metrics = {"p": p, "r": r, "f1": f1,
+                   "acc": acc, "avg_val_loss": avg_val_loss}
         return metrics
 
     def train(self):
         wandb.watch(self.model)
+
+        self.model.to(self.args.device)
+        if self.args.ngpus > 1 and self.args.device == "cuda":
+            model = nn.DataParallel(self.model)
+        else:
+            model = self.model
+
         lr_scheduler, optimizer = self.build_optimizer()
         ema, fgm, pgd, pgd_attack_round = self.add_tricks()
 
@@ -64,12 +83,6 @@ class Trainer:
         global_steps = 0
         accumulated_train_loss = 0.0
         accumulated_train_loss_shadow = 0.0
-
-        self.model.to(self.args.device)
-        if self.args.ngpus > 1 and self.args.device == "cuda":
-            model = nn.DataParallel(self.model)
-        else:
-            model = self.model
 
         for _ in epoch_iterator:
 
@@ -128,15 +141,15 @@ class Trainer:
 
     def after_eval(self, ema, global_steps, metrics, model):
         assert (
-            self.args.self.monitor_metric in metrics
+            self.args.monitor_metric in metrics
         ), "monitor metric didn't been calculated"
-        if metrics[self.args.self.monitor_metric] > self.monitor_metric:
+        if metrics[self.args.monitor_metric] > self.monitor_metric:
             model_save_path = os.path.join(
                 self.args.output_dir,
-                f"checkpoint-{global_steps}-{metrics[self.args.self.monitor_metric]:.6f}",
+                f"checkpoint-{global_steps}-{metrics[self.args.monitor_metric]:.6f}",
             )
             self.model.save_pretrained(model_save_path)
-            self.monitor_metric = metrics[self.args.self.monitor_metric]
+            self.monitor_metric = metrics[self.args.monitor_metric]
         table = pt.PrettyTable(
             [
                 "Train Global Steps",
@@ -156,7 +169,8 @@ class Trainer:
             metrics["f1"],
             metrics["acc"],
         ]
-        table.add_row([str(global_steps)] + [f"{metric:.6f}" for metric in pt_metrics])
+        table.add_row([str(global_steps)] +
+                      [f"{metric:.6f}" for metric in pt_metrics])
         print(f"\n\n{table}\n")
         log_wandb_metrics = {
             "train loss": metrics["avg_train_loss"],
@@ -227,7 +241,8 @@ class Trainer:
                 "weight_decay": 0.0,
             },
         ]
-        optimizer = AdamW(optimizer_grouped_parameters, lr=self.args.learning_rate)
+        optimizer = AdamW(optimizer_grouped_parameters,
+                          lr=self.args.learning_rate)
         total_steps = self.args.num_train_epochs * len(self.train_dataloader)
         lr_scheduler = get_linear_schedule_with_warmup(
             optimizer,
