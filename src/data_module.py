@@ -14,7 +14,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from transformers import PreTrainedTokenizer
 
-from .utils import json_dump
+from .utils import json_dump, json_load
 
 
 logger = logging.getLogger()
@@ -130,6 +130,9 @@ class BaseDataModule:
         raise NotImplementedError
 
     def setup(self):
+        label_mapping_path = os.path.join(self.args.data_dir, "label_mapping.json")
+        if os.path.exists(self.train_cache_path):
+            self.label_mapping = json_load(label_mapping_path)
         if self.args.overwrite or not os.path.exists(self.train_cache_path):
             self.prepare()
         else:
@@ -211,7 +214,7 @@ class MSRANERData(BaseDataModule):
             ), f"Read data incorrectly, {len(examples)}:{num_examples}"
 
             if self.args.debug:
-                examples = examples[: int(0.05 * len(examples))]
+                examples = examples[: int(0.01 * len(examples))]
 
             for ex in tqdm(
                 examples, desc="Preprocessing raw data", total=len(examples)
@@ -230,7 +233,7 @@ class MSRANERData(BaseDataModule):
                 text = "".join(words)
                 data["texts"].append(text)
                 data["tags"].append(tags)
-                data["raw_examples"] = ex
+                data["raw_examples"].append(ex)
             logger.info(f"Total have {cnt} blanks")
             return data
 
@@ -246,7 +249,7 @@ class MSRANERData(BaseDataModule):
             json_dump(label_mapping_path, self.label_mapping)
 
         encoded_data = []
-        for i, (text, tag) in tqdm(
+        for j, (text, tag) in tqdm(
             enumerate(zip(texts, tags)), desc="Encoding", total=len(texts)
         ):
 
@@ -302,7 +305,7 @@ class MSRANERData(BaseDataModule):
                 inputs.input_ids,
                 inputs.token_type_ids,
                 tag_ids,
-                raw_examples[i],
+                raw_examples[j],
                 offset_mapping,
             )
             encoded_data.append(example)
@@ -329,10 +332,15 @@ class MSRANERData(BaseDataModule):
 
 class MSRACollator(Collator):
     def __init__(
-        self, max_seq_len: int, tokenizer: PreTrainedTokenizer, label_mapping: dict
+        self,
+        max_seq_len: int,
+        tokenizer: PreTrainedTokenizer,
+        label_mapping: dict,
+        train: bool = True,
     ):
         super().__init__(max_seq_len, tokenizer)
         self.label_mapping = label_mapping
+        self.train = train
 
     def process_labels(self, labels: list, max_seq_len: Optional[int] = None):
         labels = [
@@ -342,3 +350,24 @@ class MSRACollator(Collator):
             for label in labels
         ]
         return torch.tensor(labels, dtype=torch.long)
+
+    def __call__(self, examples: list) -> dict:
+        input_ids_list, token_type_ids_list, labels_list = list(zip(*examples))
+        max_seq_len = max(len(input_id) for input_id in input_ids_list)
+        if self.train:
+            max_seq_len = min(max_seq_len, self.max_seq_len)
+
+        input_ids, token_type_ids, attention_mask = self.pad_and_truncate(
+            input_ids_list, token_type_ids_list, max_seq_len
+        )
+
+        labels = self.process_labels(labels_list, max_seq_len)
+
+        data_dict = {
+            "input_ids": input_ids,
+            "token_type_ids": token_type_ids,
+            "attention_mask": attention_mask,
+            "labels": labels,
+        }
+
+        return data_dict

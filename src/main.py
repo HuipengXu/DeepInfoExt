@@ -15,14 +15,10 @@ from .data_module import MSRANERData, MSRACollator
 
 def get_args():
     parser = argparse.ArgumentParser(description="For training")
-    parser.add_argument("--debug", default=0,
-                        help="whether to debug", type=int)
-    parser.add_argument("--do_train", default=1,
-                        help="train or test", type=int)
-    parser.add_argument("--task_name", default="NER",
-                        help="task name", type=str)
-    parser.add_argument("--username", default="xuhuipeng",
-                        help="username", type=str)
+    parser.add_argument("--debug", default=0, help="whether to debug", type=int)
+    parser.add_argument("--do_train", default=1, help="train or test", type=int)
+    parser.add_argument("--task_name", default="NER", help="task name", type=str)
+    parser.add_argument("--username", default="xuhuipeng", help="username", type=str)
     parser.add_argument(
         "--overwrite", default=0, help="whether to process data from scratch", type=int
     )
@@ -99,8 +95,7 @@ def get_args():
     parser.add_argument(
         "--ema", default=1, type=int, choices=[0, 1], help="whether to use EMA"
     )
-    parser.add_argument("--ema_decay", default=0.999,
-                        type=float, help="decay in EMA")
+    parser.add_argument("--ema_decay", default=0.999, type=float, help="decay in EMA")
     parser.add_argument(
         "--tau", default=1000, type=int, help="ema decay correction factor"
     )
@@ -124,9 +119,8 @@ def do_train(args, collator, data_module):
         args.model_path, num_labels=len(data_module.label_mapping)
     )
     model = BertWithCRF.from_pretrained(args.model_path, config=config)
-    
-    train_dataloader, dev_dataloader = data_module.create_dataloader(
-        collator=collator)
+
+    train_dataloader, dev_dataloader = data_module.create_dataloader(collator=collator)
 
     wandb.init(
         project=args.task_name,
@@ -138,14 +132,19 @@ def do_train(args, collator, data_module):
     args.output_dir = os.path.join(args.output_dir, run_name)
     os.makedirs(args.output_dir)
 
-    trainer = Trainer(args, model, train_dataloader,
-                      dev_dataloader, label_mapping=data_module.label_mapping)
+    trainer = Trainer(
+        args,
+        model,
+        train_dataloader,
+        dev_dataloader,
+        label_mapping=data_module.label_mapping,
+    )
     trainer.train()
-    
+
 
 def do_predict(args, collator, data_module):
     test_dataloader = data_module.create_dataloader(collator=collator)
-    predictor = Predictor(args, test_dataloader)
+    predictor = Predictor(args, test_dataloader, data_module.label_mapping)
     predictor.predict()
 
 
@@ -160,14 +159,17 @@ def main():
 
     tokenizer = BertTokenizerFast.from_pretrained(args.model_path)
     data_module = MSRANERData(args, tokenizer)
-    collator = MSRACollator(args.max_seq_length,
-                            tokenizer, data_module.label_mapping)
-    
+
     if args.do_train:
+        collator = MSRACollator(
+            args.max_seq_length, tokenizer, data_module.label_mapping
+        )
         do_train(args, collator, data_module)
     else:
+        collator = MSRACollator(
+            args.max_seq_length, tokenizer, data_module.label_mapping, train=False
+        )
         do_predict(args, collator, data_module)
-        
 
 
 if __name__ == "__main__":
