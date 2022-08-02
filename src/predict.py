@@ -1,6 +1,7 @@
 from argparse import Namespace
-import json
 from tqdm import tqdm
+import logging
+import json
 import os
 
 import torch
@@ -9,6 +10,11 @@ from transformers import BertConfig
 
 from .utils import json_load, get_seqeuence_labeling_metrics
 from .model import BertWithCRF
+
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 
 class Predictor:
@@ -62,7 +68,7 @@ class Predictor:
         metrics = {"p": p, "r": r, "f1": f1, "acc": acc, "avg_test_loss": avg_test_loss}
 
         self.save_bad_cases(predictions, labels)
-        print(f"\n{json.dumps(metrics, indent=2,  ensure_ascii=False)}")
+        logger.info(f"\n{json.dumps(metrics, indent=2,  ensure_ascii=False)}")
 
         return metrics
 
@@ -76,7 +82,7 @@ class Predictor:
                 continue
 
             example = examples[i]
-            tokens = example.split('\n')
+            tokens = example.split("\n")
             # unfold tag
             new_prediction = ["O"] * len(tokens)
             offsets = self.test_dataloader.dataset.data[i].offsets
