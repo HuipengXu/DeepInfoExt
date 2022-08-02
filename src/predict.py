@@ -61,17 +61,22 @@ class Predictor:
         p, r, f1, acc = get_seqeuence_labeling_metrics(labels, predictions)
         metrics = {"p": p, "r": r, "f1": f1, "acc": acc, "avg_test_loss": avg_test_loss}
 
+        self.save_bad_cases(predictions, labels)
+        print(f"\n{json.dumps(metrics, indent=2,  ensure_ascii=False)}")
+
+        return metrics
+
+    def save_bad_cases(self, predictions, labels):
         with open(self.test_raw_path, "r", encoding="utf8") as f:
             examples = f.read().split("\n\n")
 
-        # TODO 预测解码
         bad_cases = []
         for i, (label, prediction) in enumerate(zip(labels, predictions)):
             if label == prediction:
                 continue
 
             example = examples[i]
-            tokens = example.split()
+            tokens = example.split('\n')
             # unfold tag
             new_prediction = ["O"] * len(tokens)
             offsets = self.test_dataloader.dataset.data[i].offsets
@@ -97,6 +102,3 @@ class Predictor:
         with open(bad_cases_path, "w", encoding="utf8") as f:
             bad_cases = "\n".join(bad_cases)
             f.write(bad_cases)
-        print(f"\n{json.dumps(metrics, indent=2,  ensure_ascii=False)}")
-
-        return metrics

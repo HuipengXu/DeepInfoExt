@@ -1,9 +1,8 @@
 from argparse import Namespace
-from cProfile import label
-from operator import itemgetter
 from typing import Optional
 from tqdm import tqdm, trange
 import prettytable as pt
+import logging
 import wandb
 import os
 
@@ -14,6 +13,11 @@ from transformers import PreTrainedModel, get_linear_schedule_with_warmup
 
 from .utils import *
 
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
+
 
 class Trainer:
     def __init__(
@@ -22,7 +26,7 @@ class Trainer:
         model: PreTrainedModel,
         train_dataloader: DataLoader,
         dev_dataloader: DataLoader,
-        label_mapping: Optional[dict] = None
+        label_mapping: Optional[dict] = None,
     ):
         self.args = args
         self.model = model
@@ -30,8 +34,7 @@ class Trainer:
         self.dev_dataloader = dev_dataloader
         self.monitor_metric = 0.0
         if label_mapping:
-            self.id2label = {id_: label for label,
-                             id_ in label_mapping.items()}
+            self.id2label = {id_: label for label, id_ in label_mapping.items()}
 
     @torch.no_grad()
     def evaluation(self):
@@ -44,8 +47,10 @@ class Trainer:
         )
 
         for batch in val_iterator:
-            batch_labels = [[self.id2label[label] for label in label_seq]
-                            for label_seq in batch["labels"].numpy()]
+            batch_labels = [
+                [self.id2label[label] for label in label_seq]
+                for label_seq in batch["labels"].numpy()
+            ]
             labels.extend(batch_labels)
             batch_cuda = {
                 item: value.to(self.args.device) for item, value in list(batch.items())
@@ -57,14 +62,15 @@ class Trainer:
                 loss = loss.mean()
 
             val_loss += loss.item()
-            batch_predictions = [[self.id2label[pred] for pred in pred_seq]
-                                 for pred_seq in probs.argmax(dim=-1).cpu().numpy()]
+            batch_predictions = [
+                [self.id2label[pred] for pred in pred_seq]
+                for pred_seq in probs.argmax(dim=-1).cpu().numpy()
+            ]
             predictions.extend(batch_predictions)
 
         avg_val_loss = val_loss / len(self.dev_dataloader)
         p, r, f1, acc = get_seqeuence_labeling_metrics(labels, predictions)
-        metrics = {"p": p, "r": r, "f1": f1,
-                   "acc": acc, "avg_val_loss": avg_val_loss}
+        metrics = {"p": p, "r": r, "f1": f1, "acc": acc, "avg_val_loss": avg_val_loss}
         return metrics
 
     def train(self):
@@ -169,9 +175,8 @@ class Trainer:
             metrics["f1"],
             metrics["acc"],
         ]
-        table.add_row([str(global_steps)] +
-                      [f"{metric:.6f}" for metric in pt_metrics])
-        print(f"\n\n{table}\n")
+        table.add_row([str(global_steps)] + [f"{metric:.6f}" for metric in pt_metrics])
+        logger.info(f"\n\n{table}\n")
         log_wandb_metrics = {
             "train loss": metrics["avg_train_loss"],
             "eval loss": metrics["avg_val_loss"],
@@ -241,8 +246,7 @@ class Trainer:
                 "weight_decay": 0.0,
             },
         ]
-        optimizer = AdamW(optimizer_grouped_parameters,
-                          lr=self.args.learning_rate)
+        optimizer = AdamW(optimizer_grouped_parameters, lr=self.args.learning_rate)
         total_steps = self.args.num_train_epochs * len(self.train_dataloader)
         lr_scheduler = get_linear_schedule_with_warmup(
             optimizer,

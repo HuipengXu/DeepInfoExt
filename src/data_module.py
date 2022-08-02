@@ -16,8 +16,10 @@ from transformers import PreTrainedTokenizer
 
 from .utils import json_dump, json_load
 
-
-logger = logging.getLogger()
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -205,6 +207,7 @@ class BaseDataModule:
 
 class MSRANERData(BaseDataModule):
     def read_raw_data(self, file_path, num_examples=0):
+        length = []
         with open(file_path, "r", encoding="utf8") as f:
             examples = f.read().strip().split("\n\n")
             cnt = 0
@@ -220,7 +223,9 @@ class MSRANERData(BaseDataModule):
                 examples, desc="Preprocessing raw data", total=len(examples)
             ):
                 words, tags = [], []
-                for line in ex.split("\n"):
+                lines = ex.split("\n")
+                length.append(len(lines))
+                for line in lines:
                     items = line.split()
                     if len(items) == 2:
                         word, tag = items
@@ -234,7 +239,9 @@ class MSRANERData(BaseDataModule):
                 data["texts"].append(text)
                 data["tags"].append(tags)
                 data["raw_examples"].append(ex)
-            logger.info(f"Total have {cnt} blanks")
+            logger.info(
+                f"Total have {cnt} blanks, 0.99 quantile: {np.quantile(length, 0.99):.2f}, 0.95 quantile: {np.quantile(length, 0.95):.2f}"
+            )
             return data
 
     def encode(self, data: dict):
