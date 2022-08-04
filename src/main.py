@@ -82,7 +82,7 @@ def get_args():
     )
     parser.add_argument(
         "--logging_steps",
-        default=100,
+        default=50,
         type=int,
         help="Total number of steps to log metrics",
     )
