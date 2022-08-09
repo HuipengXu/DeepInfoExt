@@ -6,15 +6,10 @@ import os
 
 import torch
 from torch.utils.data import DataLoader
-from transformers import BertConfig
+from transformers import BertConfig, BertForTokenClassification
 
-from .utils import json_load, get_seqeuence_labeling_metrics
 from .model import BertWithCRF
-
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+from .utils import json_load, get_seqeuence_labeling_metrics, LOGGER
 
 
 class Predictor:
@@ -28,7 +23,7 @@ class Predictor:
         config = BertConfig.from_pretrained(
             args.model_path, num_labels=len(label_mapping)
         )
-        self.model = BertWithCRF.from_pretrained(args.save_model_path, config=config)
+        self.model = BertForTokenClassification.from_pretrained(args.save_model_path, config=config)
         self.model.to(args.device)
         self.model.eval()
 
@@ -68,7 +63,7 @@ class Predictor:
         metrics = {"p": p, "r": r, "f1": f1, "acc": acc, "avg_test_loss": avg_test_loss}
 
         self.save_bad_cases(predictions, labels)
-        logger.info(f"\n{json.dumps(metrics, indent=2,  ensure_ascii=False)}")
+        LOGGER.info(f"\n{json.dumps(metrics, indent=2,  ensure_ascii=False)}")
 
         return metrics
 

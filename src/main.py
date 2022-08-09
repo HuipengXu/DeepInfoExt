@@ -1,16 +1,23 @@
-import argparse
-import wandb
-import time
 import os
+import time
+import wandb
+import argparse
+from argparse import Namespace
 
 import torch
-from transformers import BertTokenizerFast, BertConfig
+import torch.distributed as dist
+from transformers import BertTokenizerFast, BertConfig, BertForTokenClassification
 
 from .train import Trainer
 from .predict import Predictor
 from .model import BertWithCRF
-from .utils import seed_everything
-from .data_module import MSRANERData, MSRACollator
+from .data_module import MSRANERData, BaseDataModule
+from .utils import seed_everything, select_device, LOGGER, torch_distributed_zero_first
+
+
+LOCAL_RANK = int(os.getenv("LOCAL_RANK", -1))
+RANK = int(os.getenv("RANK", -1))
+WORLD_SIZE = int(os.getenv("WORLD_SIZE", 1))
 
 
 def get_args():
@@ -105,32 +112,47 @@ def get_args():
     )
     parser.add_argument(
         "--device",
-        choices=["cpu", "cuda", "mps"],
         default="cuda:0",
         help="Select which device to train model, defaults to gpu.",
+    )
+    parser.add_argument(
+        "--local_rank",
+        type=int,
+        default=-1,
+        help="Automatic DDP Multi-GPU argument, do not modify",
     )
     args = parser.parse_args()
     return args
 
 
-def do_train(args, collator, data_module):
-    args_save = vars(args)
+def do_train(args: Namespace, data_module: BaseDataModule):
+    if RANK in {-1, 0}:
+        args_save = vars(args)
+
+        wandb.init(
+            project=args.task_name,
+            entity=args.username,
+            config=args_save,
+            dir=args.output_dir,
+        )
+        run_name = wandb.run.name if wandb.run.name else str(time.time())
+        args.output_dir = os.path.join(args.output_dir, run_name)
+        os.makedirs(args.output_dir)
+
     config = BertConfig.from_pretrained(
         args.model_path, num_labels=len(data_module.label_mapping)
     )
-    model = BertWithCRF.from_pretrained(args.model_path, config=config)
+    # model = BertWithCRF.from_pretrained(args.model_path, config=config)
+    model = BertForTokenClassification.from_pretrained(args.model_path, config=config)
 
-    train_dataloader, dev_dataloader = data_module.create_dataloader(collator=collator)
-
-    wandb.init(
-        project=args.task_name,
-        entity=args.username,
-        config=args_save,
-        dir=args.output_dir,
+    train_dataloader = data_module.create_dataloader(
+        data_cache=data_module.train_cache, shuffle=True, rank=LOCAL_RANK
     )
-    run_name = wandb.run.name if wandb.run.name else str(time.time())
-    args.output_dir = os.path.join(args.output_dir, run_name)
-    os.makedirs(args.output_dir)
+    dev_dataloader = None
+    if RANK in {-1, 0}:
+        dev_dataloader = data_module.create_dataloader(
+            data_cache=data_module.dev_cache, shuffle=False, rank=-1
+        )
 
     trainer = Trainer(
         args,
@@ -142,34 +164,43 @@ def do_train(args, collator, data_module):
     trainer.train()
 
 
-def do_predict(args, collator, data_module):
-    test_dataloader = data_module.create_dataloader(collator=collator)
+def do_predict(args: Namespace, data_module: BaseDataModule):
+    test_dataloader = data_module.create_dataloader(
+        data_cache=data_module.test_cache, shuffle=False, rank=-1
+    )
     predictor = Predictor(args, test_dataloader, data_module.label_mapping)
     predictor.predict()
 
 
 def main():
     args = get_args()
-    if not torch.cuda.is_available():
-        args.ngpus = 0
-    else:
-        args.ngpus = torch.cuda.device_count()
+    args.ngpus = torch.cuda.device_count()
+    args.device = select_device(args.device, batch_size=args.batch_size)
 
-    seed_everything(args.seed)
+    seed_everything(args.seed + 1 + RANK, deterministic=True)
+
+    if LOCAL_RANK != -1 and args.do_train == 1:
+        assert (
+            args.batch_size % WORLD_SIZE == 0
+        ), f"--batch-size {args.batch_size} must be multiple of WORLD_SIZE"
+        assert (
+            torch.cuda.device_count() > LOCAL_RANK
+        ), "insufficient CUDA devices for DDP command"
+        torch.cuda.set_device(LOCAL_RANK)
+        args.device = torch.device("cuda", LOCAL_RANK)
+        dist.init_process_group(backend="nccl" if dist.is_nccl_available() else "gloo")
 
     tokenizer = BertTokenizerFast.from_pretrained(args.model_path)
-    data_module = MSRANERData(args, tokenizer)
+    with torch_distributed_zero_first(LOCAL_RANK):
+        data_module = MSRANERData(args, tokenizer)
 
     if args.do_train:
-        collator = MSRACollator(
-            args.max_seq_length, tokenizer, data_module.label_mapping
-        )
-        do_train(args, collator, data_module)
+        do_train(args, data_module)
+        if WORLD_SIZE > 1 and RANK == 0:
+            LOGGER.info("Destroying process group... ")
+            dist.destroy_process_group()
     else:
-        collator = MSRACollator(
-            args.max_seq_length, tokenizer, data_module.label_mapping, train=False
-        )
-        do_predict(args, collator, data_module)
+        do_predict(args, data_module)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,8 @@
 import os
 import pickle
 import logging
+from random import sample
+from sklearn.utils import shuffle
 from tqdm import tqdm
 from argparse import Namespace
 from dataclasses import dataclass
@@ -11,15 +13,18 @@ import numpy as np
 import pandas as pd
 
 import torch
+from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import Dataset, DataLoader
 from transformers import PreTrainedTokenizer
 
-from .utils import json_dump, json_load
+from .utils import json_dump, json_load, LOGGER
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+
+LOCAL_RANK = int(
+    os.getenv("LOCAL_RANK", -1)
+)  # https://pytorch.org/docs/stable/elastic/run.html
+RANK = int(os.getenv("RANK", -1))
+WORLD_SIZE = int(os.getenv("WORLD_SIZE", 1))
 
 
 @dataclass
@@ -142,38 +147,43 @@ class BaseDataModule:
 
     def create_dataloader(
         self,
-        dataset: Dataset = BaseDataset,
-        collator: Collator = Collator,
+        data_cache: Optional[list] = None,
+        shuffle=True,
+        rank=-1,
+        CustomDataset: Dataset = BaseDataset,
     ):
-        """返回训练集和验证集的 DataLoader 对象."""
-        if self.args.do_train:
-            train_dataset = dataset(self.train_cache)
-            dev_dataset = dataset(self.dev_cache)
-            train_dataloader = DataLoader(
-                dataset=train_dataset,
-                batch_size=self.args.batch_size,
-                shuffle=True,
-                num_workers=self.args.num_workers,
-                collate_fn=collator,
-            )
-            dev_dataloader = DataLoader(
-                dataset=dev_dataset,
-                batch_size=self.args.batch_size,
-                shuffle=False,
-                num_workers=self.args.num_workers,
-                collate_fn=collator,
-            )
-            return train_dataloader, dev_dataloader
-        else:
-            test_dataset = dataset(self.test_cache)
-            test_dataloader = DataLoader(
-                dataset=test_dataset,
-                batch_size=self.args.batch_size,
-                shuffle=False,
-                num_workers=self.args.num_workers,
-                collate_fn=collator,
-            )
-            return test_dataloader
+        """返回训练集,验证集的 DataLoader 对象."""
+        batch_size = self.args.batch_size // WORLD_SIZE
+        if not shuffle:  # eval or test
+            batch_size *= 2
+        nd = torch.cuda.device_count()  # number of CUDA devices
+        nw = min(
+            [
+                os.cpu_count() // max(nd, 1),
+                batch_size if batch_size > 1 else 0,
+                self.args.num_workers,
+            ]
+        )  # number of workers
+        dataset = CustomDataset(data_cache)
+        sampler = (
+            None if rank == -1 else DistributedSampler(dataset, shuffle=shuffle)
+        )
+        collator = MSRACollator(
+            self.args.max_seq_length,
+            self.tokenizer,
+            self.label_mapping,
+            train=self.args.do_train == 1,
+        )
+        dataloader = DataLoader(
+            dataset=dataset,
+            batch_size=batch_size,
+            shuffle=shuffle and sampler is None,
+            sampler=sampler,
+            num_workers=nw,
+            pin_memory=True,
+            collate_fn=collator,
+        )
+        return dataloader
 
     @staticmethod
     def pkl_dump(data: dict, data_path: str):
@@ -239,7 +249,7 @@ class MSRANERData(BaseDataModule):
                 data["texts"].append(text)
                 data["tags"].append(tags)
                 data["raw_examples"].append(ex)
-            logger.info(
+            LOGGER.info(
                 f"Total have {cnt} blanks, 0.99 quantile: {np.quantile(length, 0.99):.2f}, 0.95 quantile: {np.quantile(length, 0.95):.2f}"
             )
             return data
@@ -288,7 +298,7 @@ class MSRANERData(BaseDataModule):
                 ):
                     cur_tag = span_tag[0]
                 else:
-                    logger.info(
+                    LOGGER.info(
                         f"Entity is cut error: {text[:offset[0]]}-{text[offset[0]: offset[-1]]}-{text[offset[-1]:]}"
                     )
                     cur_tag = "O"
@@ -334,7 +344,7 @@ class MSRANERData(BaseDataModule):
         self.train_cache = encoded_train_data[num_dev_examples:]
 
         self.to_pickle()
-        logger.info("Data have been cached")
+        LOGGER.info("Data have been cached")
 
 
 class MSRACollator(Collator):

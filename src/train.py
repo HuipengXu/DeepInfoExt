@@ -2,7 +2,6 @@ from argparse import Namespace
 from typing import Optional
 from tqdm import tqdm, trange
 import prettytable as pt
-import logging
 import wandb
 import os
 
@@ -13,10 +12,9 @@ from transformers import PreTrainedModel, get_linear_schedule_with_warmup
 
 from .utils import *
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
+LOCAL_RANK = int(os.getenv("LOCAL_RANK", -1))
+RANK = int(os.getenv("RANK", -1))
+WORLD_SIZE = int(os.getenv("WORLD_SIZE", 1))
 
 
 class Trainer:
@@ -74,27 +72,41 @@ class Trainer:
         return metrics
 
     def train(self):
-        wandb.watch(self.model)
-
-        self.model.to(self.args.device)
-        if self.args.ngpus > 1 and self.args.device == "cuda":
-            model = nn.DataParallel(self.model)
-        else:
-            model = self.model
+        if RANK in {-1, 0}:
+            wandb.watch(self.model)
 
         lr_scheduler, optimizer = self.build_optimizer()
+
+        if self.args.device.type != "cpu":
+            model = self.model.to(self.args.device)
+            if LOCAL_RANK != -1:
+                model = smart_DDP(self.model, local_rank=LOCAL_RANK)
+            elif self.args.ngpus > 1:
+                model = nn.DataParallel(model)
+
         ema, fgm, pgd, pgd_attack_round = self.add_tricks()
 
-        epoch_iterator = trange(self.args.num_train_epochs)
+        epoch_iterator = trange(
+            self.args.num_train_epochs, desc="Epoch", disable=RANK not in {-1, 0}
+        )
+
         global_steps = 0
         accumulated_train_loss = 0.0
         accumulated_train_loss_shadow = 0.0
 
-        for _ in epoch_iterator:
+        optimizer.zero_grad()
+        for epoch in epoch_iterator:
+
+            if RANK != -1:
+                self.train_dataloader.sampler.set_epoch(epoch)
 
             train_iterator = tqdm(
-                self.train_dataloader, desc="Training", total=len(self.train_dataloader)
+                self.train_dataloader,
+                desc="Training",
+                total=len(self.train_dataloader),
+                disable=RANK not in {-1, 0},
             )
+
             model.train()
             for batch in train_iterator:
                 batch_cuda = {
@@ -110,7 +122,7 @@ class Trainer:
 
                 self.step(lr_scheduler, optimizer)
 
-                if self.args.ema:
+                if ema:
                     ema.update()
 
                 accumulated_train_loss += loss.item()
@@ -120,11 +132,14 @@ class Trainer:
                     f"running-training-loss: {loss.item():.4f}"
                 )
                 lr = lr_scheduler.get_last_lr()[0]
-                wandb.log(
-                    {"running training loss": loss.item(), "lr": lr}, step=global_steps
-                )
 
-                if global_steps % self.args.logging_steps == 0:
+                if RANK in {-1, 0}:
+                    wandb.log(
+                        {"running training loss": loss.item(), "lr": lr},
+                        step=global_steps,
+                    )
+
+                if RANK in {-1, 0} and global_steps % self.args.logging_steps == 0:
                     avg_train_loss = (
                         accumulated_train_loss - accumulated_train_loss_shadow
                     ) / self.args.logging_steps
@@ -137,7 +152,7 @@ class Trainer:
 
                     self.after_eval(ema, global_steps, metrics, model)
 
-        return model
+        return self.model
 
     @staticmethod
     def step(lr_scheduler, optimizer):
@@ -176,7 +191,7 @@ class Trainer:
             metrics["acc"],
         ]
         table.add_row([str(global_steps)] + [f"{metric:.6f}" for metric in pt_metrics])
-        logger.info(f"\n\n{table}\n")
+        LOGGER.info(f"\n\n{table}\n")
         log_wandb_metrics = {
             "train loss": metrics["avg_train_loss"],
             "eval loss": metrics["avg_val_loss"],
@@ -225,7 +240,7 @@ class Trainer:
             fgm = FGM(self.model)
         elif self.args.adv == "pgd":
             pgd = PGD(self.model)
-        if self.args.ema:
+        if self.args.ema and RANK in {-1, 0}:
             ema = EMA(self.model, decay=0.999)
         return ema, fgm, pgd, pgd_attack_round
 

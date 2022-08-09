@@ -1,5 +1,4 @@
-from transformers import PreTrainedModel, BertPreTrainedModel, BertModel
-from torchcrf import CRF
+from transformers import PreTrainedModel, BertPreTrainedModel, BertModel, BertForTokenClassification
 import torch.nn as nn
 
 
