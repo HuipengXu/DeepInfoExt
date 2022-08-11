@@ -38,7 +38,7 @@ class Predictor:
 
         for batch in test_iterator:
             batch_labels = [
-                [self.id2label[label] for label in label_seq]
+                [self.id2label[label] for label in label_seq[1:-1]]
                 for label_seq in batch["labels"].numpy()
             ]
             labels.extend(batch_labels)
@@ -53,7 +53,7 @@ class Predictor:
 
             test_loss += loss.item()
             batch_predictions = [
-                [self.id2label[pred] for pred in pred_seq]
+                [self.id2label[pred] for pred in pred_seq[1:-1]]
                 for pred_seq in probs.argmax(dim=-1).cpu().numpy()
             ]
             predictions.extend(batch_predictions)
@@ -72,15 +72,14 @@ class Predictor:
             examples = f.read().split("\n\n")
 
         bad_cases = []
+        good_cases = []
         for i, (label, prediction) in enumerate(zip(labels, predictions)):
-            if label == prediction:
-                continue
-
             example = examples[i]
             tokens = example.split("\n")
             # unfold tag
             new_prediction = ["O"] * len(tokens)
             offsets = self.test_dataloader.dataset.data[i].offsets
+            offsets = offsets[:len(prediction)]
             for j, offset in enumerate(offsets):
                 cur_tag = prediction[j]
                 if cur_tag.startswith("I"):
@@ -97,9 +96,19 @@ class Predictor:
             tokens_with_pred = [
                 f"{token.strip()} {new_prediction[k]}" for k, token in enumerate(tokens)
             ]
-            bad_cases.append("\n".join(tokens_with_pred))
+            
+            example_with_pred = "\n".join(tokens_with_pred)
+            if label != prediction:
+                bad_cases.append(example_with_pred)
+            else:
+                good_cases.append(example_with_pred)
 
         bad_cases_path = os.path.join(self.args.data_dir, "bad_cases.txt")
+        good_cases_path = os.path.join(self.args.data_dir, "good_cases.txt")
         with open(bad_cases_path, "w", encoding="utf8") as f:
             bad_cases = "\n".join(bad_cases)
             f.write(bad_cases)
+                                          
+        with open(good_cases_path, "w", encoding="utf8") as f:
+            good_cases = "\n".join(good_cases)
+            f.write(good_cases)

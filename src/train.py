@@ -46,7 +46,7 @@ class Trainer:
 
         for batch in val_iterator:
             batch_labels = [
-                [self.id2label[label] for label in label_seq]
+                [self.id2label[label] for label in label_seq[1:-1]]  # exclude cls and sep
                 for label_seq in batch["labels"].numpy()
             ]
             labels.extend(batch_labels)
@@ -61,17 +61,16 @@ class Trainer:
 
             val_loss += loss.item()
             batch_predictions = [
-                [self.id2label[pred] for pred in pred_seq]
+                [self.id2label[pred] for pred in pred_seq[1:-1]]
                 for pred_seq in probs.argmax(dim=-1).cpu().numpy()
             ]
             predictions.extend(batch_predictions)
 
         avg_val_loss = val_loss / len(self.dev_dataloader)
         p, r, f1, acc = get_seqeuence_labeling_metrics(labels, predictions)
-        metrics = {"p": p, "r": r, "f1": f1, "acc": acc, "avg_val_loss": avg_val_loss}
-        return metrics
+        return {"p": p, "r": r, "f1": f1, "acc": acc, "avg_val_loss": avg_val_loss}
 
-    def train(self):
+    def train(self):  # sourcery skip: low-code-quality
         if RANK in {-1, 0}:
             wandb.watch(self.model)
 
@@ -145,12 +144,15 @@ class Trainer:
                     ) / self.args.logging_steps
                     accumulated_train_loss_shadow = accumulated_train_loss
 
-                    if self.args.ema:
+                    if ema:
                         ema.apply_shadow()
                     metrics = self.evaluation()
                     metrics["avg_train_loss"] = avg_train_loss
 
-                    self.after_eval(ema, global_steps, metrics, model)
+                    self.save_and_log(global_steps, metrics)
+                    if ema:
+                        ema.restore()
+                    model.train()
 
         return self.model
 
@@ -160,7 +162,7 @@ class Trainer:
         lr_scheduler.step()
         optimizer.zero_grad()
 
-    def after_eval(self, ema, global_steps, metrics, model):
+    def save_and_log(self, global_steps, metrics):
         assert (
             self.args.monitor_metric in metrics
         ), "monitor metric didn't been calculated"
@@ -201,9 +203,6 @@ class Trainer:
             "eval acc": metrics["acc"],
         }
         wandb.log(log_wandb_metrics, step=global_steps)
-        model.train()
-        if self.args.ema:
-            ema.restore()
 
     def attack(self, batch_cuda, model, fgm, pgd, pgd_attack_round):
         if self.args.adv == "fgm":
@@ -244,7 +243,7 @@ class Trainer:
             ema = EMA(self.model, decay=0.999)
         return ema, fgm, pgd, pgd_attack_round
 
-    def build_optimizer(self):
+    def build_optimizer(self):  # sourcery skip: invert-any-all
         param_optimizer = list(self.model.named_parameters())
         no_decay = ["bias", "LayerNorm.weight"]
         optimizer_grouped_parameters = [
@@ -261,6 +260,7 @@ class Trainer:
                 "weight_decay": 0.0,
             },
         ]
+
         optimizer = AdamW(optimizer_grouped_parameters, lr=self.args.learning_rate)
         total_steps = self.args.num_train_epochs * len(self.train_dataloader)
         lr_scheduler = get_linear_schedule_with_warmup(
@@ -268,4 +268,5 @@ class Trainer:
             num_warmup_steps=int(self.args.warmup_ratio * total_steps),
             num_training_steps=total_steps,
         )
+
         return lr_scheduler, optimizer

@@ -208,6 +208,7 @@ def emojis(str=""):
 
 
 def select_device(device="", batch_size=0, newline=True):
+    # sourcery skip: de-morgan
     # device = None or 'cpu' or 0 or '0' or '0,1,2,3'
     s = f"MSRA-NER 🚀   Python-{platform.python_version()} torch-{torch.__version__} \n"
     device = (

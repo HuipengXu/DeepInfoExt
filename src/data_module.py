@@ -43,16 +43,14 @@ class BaseDataset(Dataset):
         self.data = data
 
     def __getitem__(self, index):
-        example = [
+        return [
             self.data[index].input_ids,
             self.data[index].token_type_ids,
             self.data[index].labels,
         ]
-        return example
 
     def __len__(self):
-        num_examples = len(self.data)
-        return num_examples
+        return len(self.data)
 
 
 class Collator:
@@ -95,21 +93,17 @@ class Collator:
         input_ids_list, token_type_ids_list, labels_list = list(zip(*examples))
         cur_max_seq_len = max(len(input_id) for input_id in input_ids_list)
         max_seq_len = min(cur_max_seq_len, self.max_seq_len)
-
         input_ids, token_type_ids, attention_mask = self.pad_and_truncate(
             input_ids_list, token_type_ids_list, max_seq_len
         )
 
         labels = self.process_labels(labels_list, max_seq_len)
-
-        data_dict = {
+        return {
             "input_ids": input_ids,
             "token_type_ids": token_type_ids,
             "attention_mask": attention_mask,
             "labels": labels,
         }
-
-        return data_dict
 
 
 class BaseDataModule:
@@ -165,16 +159,13 @@ class BaseDataModule:
             ]
         )  # number of workers
         dataset = CustomDataset(data_cache)
-        sampler = (
-            None if rank == -1 else DistributedSampler(dataset, shuffle=shuffle)
-        )
+        sampler = None if rank == -1 else DistributedSampler(dataset, shuffle=shuffle)
         collator = MSRACollator(
             self.args.max_seq_length,
             self.tokenizer,
             self.label_mapping,
-            train=self.args.do_train == 1,
         )
-        dataloader = DataLoader(
+        return DataLoader(
             dataset=dataset,
             batch_size=batch_size,
             shuffle=shuffle and sampler is None,
@@ -183,7 +174,6 @@ class BaseDataModule:
             pin_memory=True,
             collate_fn=collator,
         )
-        return dataloader
 
     @staticmethod
     def pkl_dump(data: dict, data_path: str):
@@ -258,76 +248,76 @@ class MSRANERData(BaseDataModule):
         texts = data["texts"]
         tags = data["tags"]
         raw_examples = data["raw_examples"]
+        tag_set = {t for tag in tags for t in tag}
 
-        tag_set = set(t for tag in tags for t in tag)
         if not self.label_mapping:
             self.label_mapping = {tag: i for i, tag in enumerate(tag_set)}
             label_mapping_path = os.path.join(self.args.data_dir, "label_mapping.json")
             json_dump(label_mapping_path, self.label_mapping)
 
         encoded_data = []
-        for j, (text, tag) in tqdm(
-            enumerate(zip(texts, tags)), desc="Encoding", total=len(texts)
+        for raw_example, text, tag in tqdm(
+            zip(raw_examples, texts, tags), desc="Encoding", total=len(texts)
         ):
-
-            inputs = self.tokenizer.encode_plus(
-                text,
-                add_special_tokens=True,
-                padding=False,
-                truncation=False,
-                return_token_type_ids=True,
-                return_attention_mask=False,
-                return_offsets_mapping=True,
-            )
-
-            offset_mapping = inputs.offset_mapping[1:-1]
-            merged_tag = []
-            for offset in offset_mapping:
-                span_tag = []
-                for i in range(offset[0], offset[-1]):
-                    if not span_tag:
-                        span_tag.append(tag[i])
-                    elif tag[i] != span_tag[-1]:
-                        span_tag.append(tag[i])
-                if len(span_tag) == 1:
-                    cur_tag = span_tag[0]
-                elif (
-                    len(span_tag) == 2
-                    and span_tag[0].startswith("B")
-                    and span_tag[-1].startswith("I")
-                ):
-                    cur_tag = span_tag[0]
-                else:
-                    LOGGER.info(
-                        f"Entity is cut error: {text[:offset[0]]}-{text[offset[0]: offset[-1]]}-{text[offset[-1]:]}"
-                    )
-                    cur_tag = "O"
-
-                if (
-                    cur_tag.startswith("I")
-                    and len(merged_tag) > 0
-                    and merged_tag[-1] == "O"
-                ):
-                    cur_tag == "O"
-                merged_tag.append(cur_tag)
-
-            merged_tag = ["O"] + merged_tag + ["O"]
-            assert len(merged_tag) == len(
-                inputs.input_ids
-            ), "Label's length must be equal to input's length"
-
-            tag_ids = [self.label_mapping[t] for t in merged_tag]
-
-            example = InputExample(
-                inputs.input_ids,
-                inputs.token_type_ids,
-                tag_ids,
-                raw_examples[j],
-                offset_mapping,
-            )
+            example = self.encode_step(raw_example, text, tag)
             encoded_data.append(example)
 
         return encoded_data
+
+    def encode_step(self, raw_example, text, tag):
+        inputs = self.tokenizer.encode_plus(
+            text,
+            add_special_tokens=True,
+            padding=False,
+            truncation=False,
+            return_token_type_ids=True,
+            return_attention_mask=False,
+            return_offsets_mapping=True,
+        )
+
+        offset_mapping = inputs.offset_mapping[1:-1]
+        merged_tag = self.merge_tag(text, tag, offset_mapping)
+        assert len(merged_tag) == len(
+            inputs.input_ids
+        ), "Label's length must be equal to input's length"
+
+        tag_ids = [self.label_mapping[t] for t in merged_tag]
+
+        return InputExample(
+            inputs.input_ids,
+            inputs.token_type_ids,
+            tag_ids,
+            raw_example,
+            offset_mapping,
+        )
+
+    def merge_tag(self, text, tag, offset_mapping):
+        merged_tag = []
+        for offset in offset_mapping:
+            span_tag = []
+            for i in range(offset[0], offset[-1]):
+                if not span_tag or tag[i] != span_tag[-1]:
+                    span_tag.append(tag[i])
+            if len(span_tag) == 1:
+                cur_tag = span_tag[0]
+            elif (
+                len(span_tag) == 2
+                and span_tag[0].startswith("B")
+                and span_tag[-1].startswith("I")
+            ):
+                cur_tag = span_tag[0]
+            else:
+                LOGGER.info(
+                    f"Entity is cut error: {text[:offset[0]]}-{text[offset[0]:offset[-1]]}-{text[offset[-1]:]}"
+                )
+                cur_tag = "O"
+
+            if cur_tag.startswith("I") and merged_tag and merged_tag[-1] == "O":
+                cur_tag == "O"
+            merged_tag.append(cur_tag)
+
+        merged_tag = ["O"] + merged_tag + ["O"]
+        return merged_tag
 
     def prepare(self):
         train_data_path = os.path.join(self.args.data_dir, "msra_train_bio.txt")
@@ -352,12 +342,10 @@ class MSRACollator(Collator):
         self,
         max_seq_len: int,
         tokenizer: PreTrainedTokenizer,
-        label_mapping: dict,
-        train: bool = True,
+        label_mapping: dict
     ):
         super().__init__(max_seq_len, tokenizer)
         self.label_mapping = label_mapping
-        self.train = train
 
     def process_labels(self, labels: list, max_seq_len: Optional[int] = None):
         labels = [
@@ -371,20 +359,15 @@ class MSRACollator(Collator):
     def __call__(self, examples: list) -> dict:
         input_ids_list, token_type_ids_list, labels_list = list(zip(*examples))
         max_seq_len = max(len(input_id) for input_id in input_ids_list)
-        if self.train:
-            max_seq_len = min(max_seq_len, self.max_seq_len)
-
+        max_seq_len = min(max_seq_len, self.max_seq_len)
         input_ids, token_type_ids, attention_mask = self.pad_and_truncate(
             input_ids_list, token_type_ids_list, max_seq_len
         )
 
         labels = self.process_labels(labels_list, max_seq_len)
-
-        data_dict = {
+        return {
             "input_ids": input_ids,
             "token_type_ids": token_type_ids,
             "attention_mask": attention_mask,
             "labels": labels,
         }
-
-        return data_dict

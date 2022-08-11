@@ -107,6 +107,8 @@ def get_args():
         "--tau", default=1000, type=int, help="ema decay correction factor"
     )
     parser.add_argument("--adv", default=None, type=str, help="use fgm or pgd")
+    parser.add_argument("--eps", default=0.5, type=float, help="epsilon for fgm or pgd")
+    parser.add_argument("--alpha", default=0.3, type=float, help="alpha for pgd")
     parser.add_argument(
         "--seed", default=42, type=int, help="random seed for initialization"
     )
@@ -121,8 +123,7 @@ def get_args():
         default=-1,
         help="Automatic DDP Multi-GPU argument, do not modify",
     )
-    args = parser.parse_args()
-    return args
+    return parser.parse_args()
 
 
 def do_train(args: Namespace, data_module: BaseDataModule):
@@ -135,7 +136,7 @@ def do_train(args: Namespace, data_module: BaseDataModule):
             config=args_save,
             dir=args.output_dir,
         )
-        run_name = wandb.run.name if wandb.run.name else str(time.time())
+        run_name = wandb.run.name or str(time.time())
         args.output_dir = os.path.join(args.output_dir, run_name)
         os.makedirs(args.output_dir)
 

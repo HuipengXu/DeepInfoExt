@@ -156,3 +156,4 @@ outputs
 wandb
 data
 playground.py
+local*
