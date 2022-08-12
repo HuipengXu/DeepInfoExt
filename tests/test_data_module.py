@@ -5,7 +5,7 @@ from argparse import Namespace
 
 # sys.path.append(.)
 
-from src.data_module import MSRANERData
+from deep_info_ext.data_module import MSRANERData
 
 class TestDataModule(unittest.TestCase):
     
