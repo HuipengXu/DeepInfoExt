@@ -1,0 +1,8 @@
+evaluate==0.2.2
+numpy==1.23.1
+prettytable==3.3.0
+scikit_learn==1.1.2
+setuptools==45.2.0
+torch==1.11.0+cu113
+tqdm==4.62.3
+transformers==4.21.0
