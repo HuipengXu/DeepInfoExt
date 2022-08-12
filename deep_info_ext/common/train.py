@@ -46,7 +46,9 @@ class Trainer:
 
         for batch in val_iterator:
             batch_labels = [
-                [self.id2label[label] for label in label_seq[1:-1]]  # exclude cls and sep
+                [
+                    self.id2label[label] for label in label_seq[1:-1]
+                ]  # exclude cls and sep
                 for label_seq in batch["labels"].numpy()
             ]
             labels.extend(batch_labels)
@@ -270,3 +272,6 @@ class Trainer:
         )
 
         return lr_scheduler, optimizer
+
+
+

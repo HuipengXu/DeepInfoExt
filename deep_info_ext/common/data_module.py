@@ -156,7 +156,7 @@ class BaseDataModule:
         )  # number of workers
         dataset = CustomDataset(data_cache)
         sampler = None if rank == -1 else DistributedSampler(dataset, shuffle=shuffle)
-        collator = MSRACollator(
+        collator = NERCollator(
             self.args.max_seq_length,
             self.tokenizer,
             self.label_mapping,
@@ -201,7 +201,7 @@ class BaseDataModule:
             self.test_cache = self.pkl_load(self.test_cache_path)
 
 
-class MSRANERData(BaseDataModule):
+class NERDataModule(BaseDataModule):
     def read_raw_data(self, file_path, num_examples=0):
         length = []
         with open(file_path, "r", encoding="utf8") as f:
@@ -316,10 +316,14 @@ class MSRANERData(BaseDataModule):
         return merged_tag
 
     def prepare(self):
-        train_data_path = os.path.join(self.args.data_dir, "msra_train_bio.txt")
-        test_data_path = os.path.join(self.args.data_dir, "msra_test_bio.txt")
-        train_data = self.read_raw_data(train_data_path, num_examples=45000)
-        test_data = self.read_raw_data(test_data_path, num_examples=3442)
+        train_data_path = os.path.join(self.args.data_dir, self.args.train_file)
+        test_data_path = os.path.join(self.args.data_dir, self.args.test_file)
+        train_data = self.read_raw_data(
+            train_data_path, num_examples=self.args.num_train_examples
+        )
+        test_data = self.read_raw_data(
+            test_data_path, num_examples=self.args.num_test_examples
+        )
 
         encoded_train_data = self.encode(train_data)
         self.test_cache = self.encode(test_data)
@@ -333,12 +337,9 @@ class MSRANERData(BaseDataModule):
         LOGGER.info("Data have been cached")
 
 
-class MSRACollator(Collator):
+class NERCollator(Collator):
     def __init__(
-        self,
-        max_seq_len: int,
-        tokenizer: PreTrainedTokenizer,
-        label_mapping: dict
+        self, max_seq_len: int, tokenizer: PreTrainedTokenizer, label_mapping: dict
     ):
         super().__init__(max_seq_len, tokenizer)
         self.label_mapping = label_mapping

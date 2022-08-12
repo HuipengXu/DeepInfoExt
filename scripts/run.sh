@@ -1,4 +1,5 @@
 export TOKENIZERS_PARALLELISM=true
+export PYTHONPATH="../deep_info_ext"
 # export OMP_NUM_THREADS=1
 # python3 -m torch.distributed.launch --nnodes=1 --nproc_per_node=2 -m src.main \
 #         --overwrite 0 \
@@ -12,7 +13,7 @@ export TOKENIZERS_PARALLELISM=true
 #         --batch_size 32 \
 #         --num_train_epochs 5 \
 #         --logging_steps 500
-torchrun --nnodes=1 --nproc_per_node=2 -m src.main \
+torchrun --nnodes=1 --nproc_per_node=2 -m deep_info_ext.ner.bert_softmax.main \
         --overwrite 0 \
         --debug 0 \
         --max_seq_length 128 \
@@ -23,7 +24,11 @@ torchrun --nnodes=1 --nproc_per_node=2 -m src.main \
         --learning_rate 2e-5 \
         --batch_size 32 \
         --num_train_epochs 5 \
-        --logging_steps 500
+        --logging_steps 500 \
+        --train_file msra_train_bio.txt \
+        --test_file msra_test_bio.txt \
+        --num_train_examples 45000 \
+        --num_test_examples 3442
 # python3 -m src.main \
 #         --overwrite 0 \
 #         --debug 0 \

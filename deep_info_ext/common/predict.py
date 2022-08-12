@@ -7,7 +7,7 @@ import torch
 from torch.utils.data import DataLoader
 from transformers import BertConfig, BertForTokenClassification
 
-from .model import BertWithCRF
+from ..ner.bert_crf.model import BertWithCRF
 from .utils import json_load, get_seqeuence_labeling_metrics, LOGGER
 
 
