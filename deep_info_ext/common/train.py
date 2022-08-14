@@ -84,6 +84,8 @@ class Trainer:
                 model = smart_DDP(self.model, local_rank=LOCAL_RANK)
             elif self.args.ngpus > 1:
                 model = nn.DataParallel(model)
+        else:
+            model = self.model
 
         ema, fgm, pgd, pgd_attack_round = self.add_tricks()
 

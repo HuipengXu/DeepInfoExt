@@ -11,7 +11,12 @@ from ...common.train import Trainer
 from ...common.predict import Predictor
 from ...common.args import get_default_parser
 from ...common.data_module import NERDataModule, BaseDataModule
-from ...common.utils import seed_everything, select_device, LOGGER, torch_distributed_zero_first
+from ...common.utils import (
+    seed_everything,
+    select_device,
+    LOGGER,
+    torch_distributed_zero_first,
+)
 
 
 LOCAL_RANK = int(os.getenv("LOCAL_RANK", -1))
@@ -24,7 +29,7 @@ def get_args():
     return parser.parse_args()
 
 
-def do_train(args: Namespace, data_module: BaseDataModule):
+def do_train(args: Namespace, data_module: BaseDataModule, config: BertConfig):
     if RANK in {-1, 0}:
         args_save = vars(args)
 
@@ -38,9 +43,6 @@ def do_train(args: Namespace, data_module: BaseDataModule):
         args.output_dir = os.path.join(args.output_dir, run_name)
         os.makedirs(args.output_dir)
 
-    config = BertConfig.from_pretrained(
-        args.model_path, num_labels=len(data_module.label_mapping)
-    )
     model = BertForTokenClassification.from_pretrained(args.model_path, config=config)
 
     train_dataloader = data_module.create_dataloader(
@@ -62,11 +64,14 @@ def do_train(args: Namespace, data_module: BaseDataModule):
     trainer.train()
 
 
-def do_predict(args: Namespace, data_module: BaseDataModule):
+def do_predict(args: Namespace, data_module: BaseDataModule, config: BertConfig):
     test_dataloader = data_module.create_dataloader(
         data_cache=data_module.test_cache, shuffle=False, rank=-1
     )
-    predictor = Predictor(args, test_dataloader, data_module.label_mapping)
+    model = BertForTokenClassification.from_pretrained(
+        args.save_model_path, config=config
+    )
+    predictor = Predictor(args, model, test_dataloader, data_module.label_mapping)
     predictor.predict()
 
 
@@ -92,13 +97,17 @@ def main():
     with torch_distributed_zero_first(LOCAL_RANK):
         data_module = NERDataModule(args, tokenizer)
 
+    config = BertConfig.from_pretrained(
+        args.model_path, num_labels=len(data_module.label_mapping)
+    )
+
     if args.do_train:
-        do_train(args, data_module)
+        do_train(args, data_module, config)
         if WORLD_SIZE > 1 and RANK == 0:
             LOGGER.info("Destroying process group... ")
             dist.destroy_process_group()
     else:
-        do_predict(args, data_module)
+        do_predict(args, data_module, config)
 
 
 if __name__ == "__main__":

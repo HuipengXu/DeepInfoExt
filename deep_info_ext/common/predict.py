@@ -5,25 +5,24 @@ from argparse import Namespace
 
 import torch
 from torch.utils.data import DataLoader
-from transformers import BertConfig, BertForTokenClassification
+from transformers import PreTrainedModel
 
-from ..ner.bert_crf.model import BertWithCRF
 from .utils import json_load, get_seqeuence_labeling_metrics, LOGGER
 
 
 class Predictor:
     def __init__(
-        self, args: Namespace, test_dataloader: DataLoader, label_mapping: dict
+        self,
+        args: Namespace,
+        model: PreTrainedModel,
+        test_dataloader: DataLoader,
+        label_mapping: dict,
     ) -> None:
         self.args = args
-        self.test_raw_path = os.path.join(args.data_dir, "msra_test_bio.txt")
+        self.test_raw_path = os.path.join(args.data_dir, args.test_file)
         self.test_dataloader = test_dataloader
         self.id2label = {id_: label for label, id_ in label_mapping.items()}
-        config = BertConfig.from_pretrained(
-            args.model_path, num_labels=len(label_mapping)
-        )
-        self.model = BertForTokenClassification.from_pretrained(args.save_model_path, config=config)
-        self.model.to(args.device)
+        self.model = model.to(args.device)
         self.model.eval()
 
     @torch.no_grad()
@@ -78,7 +77,7 @@ class Predictor:
             # unfold tag
             new_prediction = ["O"] * len(tokens)
             offsets = self.test_dataloader.dataset.data[i].offsets
-            offsets = offsets[:len(prediction)]
+            offsets = offsets[: len(prediction)]
             for j, offset in enumerate(offsets):
                 cur_tag = prediction[j]
                 if cur_tag.startswith("I"):
@@ -95,7 +94,7 @@ class Predictor:
             tokens_with_pred = [
                 f"{token.strip()} {new_prediction[k]}" for k, token in enumerate(tokens)
             ]
-            
+
             example_with_pred = "\n".join(tokens_with_pred)
             if label != prediction:
                 bad_cases.append(example_with_pred)
@@ -107,7 +106,7 @@ class Predictor:
         with open(bad_cases_path, "w", encoding="utf8") as f:
             bad_cases = "\n".join(bad_cases)
             f.write(bad_cases)
-                                          
+
         with open(good_cases_path, "w", encoding="utf8") as f:
             good_cases = "\n".join(good_cases)
             f.write(good_cases)

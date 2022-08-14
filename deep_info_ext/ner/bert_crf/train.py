@@ -11,7 +11,9 @@ class CRFTrainer(Trainer):
         optimizer_grouped_parameters = [
             {
                 "params": [
-                    p for n, p in param_optimizer if not any(nd in n for nd in no_decay)
+                    p
+                    for n, p in param_optimizer
+                    if not (any(nd in n for nd in no_decay) or n.startswith("crf"))
                 ],
                 "weight_decay": self.args.weight_decay,
             },
@@ -22,7 +24,7 @@ class CRFTrainer(Trainer):
                 "weight_decay": 0.0,
             },
             {
-                "params": [p for n, p in param_optimizer if n.endswith("transitions")],
+                "params": [p for n, p in param_optimizer if n.startswith("crf")],
                 "weight_decay": self.args.weight_decay,
                 "lr": self.args.crf_lr,
             },
