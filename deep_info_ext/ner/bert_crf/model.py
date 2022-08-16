@@ -16,9 +16,12 @@ class BertWithCRF(BertPreTrainedModel):
 
     def forward(self, input_ids, token_type_ids=None, attention_mask=None, labels=None):
         outputs = self.bert(
-            input_ids, token_type_ids=token_type_ids, attention_mask=attention_mask
+            input_ids,
+            token_type_ids=token_type_ids,
+            attention_mask=attention_mask,
+            output_hidden_states=True,
         )
-        sequence_output = outputs[0]
+        sequence_output = outputs[2][-6]  # crf 可以得到一个稍微好一点的结果
         sequence_output = self.dropout(sequence_output)
         logits = self.linear(sequence_output)
         loss = None

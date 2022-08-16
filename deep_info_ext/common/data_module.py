@@ -13,14 +13,7 @@ from transformers import PreTrainedTokenizer
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
-from .utils import json_dump, json_load, LOGGER
-
-
-LOCAL_RANK = int(
-    os.getenv("LOCAL_RANK", -1)
-)  # https://pytorch.org/docs/stable/elastic/run.html
-RANK = int(os.getenv("RANK", -1))
-WORLD_SIZE = int(os.getenv("WORLD_SIZE", 1))
+from .utils import json_dump, json_load, LOGGER, LOCAL_RANK, RANK, WORLD_SIZE
 
 
 @dataclass

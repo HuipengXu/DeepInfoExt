@@ -12,10 +12,6 @@ from transformers import PreTrainedModel, get_linear_schedule_with_warmup
 
 from .utils import *
 
-LOCAL_RANK = int(os.getenv("LOCAL_RANK", -1))
-RANK = int(os.getenv("RANK", -1))
-WORLD_SIZE = int(os.getenv("WORLD_SIZE", 1))
-
 
 class Trainer:
     def __init__(
@@ -123,6 +119,7 @@ class Trainer:
 
                 self.attack(batch_cuda, model, fgm, pgd, pgd_attack_round)
 
+                nn.utils.clip_grad_norm_(model.parameters(), self.args.max_grad_norm)
                 self.step(lr_scheduler, optimizer)
 
                 if ema:
@@ -274,6 +271,3 @@ class Trainer:
         )
 
         return lr_scheduler, optimizer
-
-
-

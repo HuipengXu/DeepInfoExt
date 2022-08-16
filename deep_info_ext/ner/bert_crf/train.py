@@ -6,26 +6,61 @@ from ...common.train import Trainer
 
 class CRFTrainer(Trainer):
     def build_optimizer(self):  # sourcery skip: invert-any-all
-        param_optimizer = list(self.model.named_parameters())
         no_decay = ["bias", "LayerNorm.weight"]
+        bert_param_optimizer = list(self.model.bert.named_parameters())
+        crf_param_optimizer = list(self.model.crf.named_parameters())
+        linear_param_optimizer = list(self.model.linear.named_parameters())
         optimizer_grouped_parameters = [
             {
                 "params": [
                     p
-                    for n, p in param_optimizer
-                    if not (any(nd in n for nd in no_decay) or n.startswith("crf"))
+                    for n, p in bert_param_optimizer
+                    if not any(nd in n for nd in no_decay)
                 ],
                 "weight_decay": self.args.weight_decay,
+                "lr": self.args.learning_rate,
             },
             {
                 "params": [
-                    p for n, p in param_optimizer if any(nd in n for nd in no_decay)
+                    p
+                    for n, p in bert_param_optimizer
+                    if any(nd in n for nd in no_decay)
                 ],
                 "weight_decay": 0.0,
+                "lr": self.args.learning_rate,
             },
             {
-                "params": [p for n, p in param_optimizer if n.startswith("crf")],
+                "params": [
+                    p
+                    for n, p in crf_param_optimizer
+                    if not any(nd in n for nd in no_decay)
+                ],
                 "weight_decay": self.args.weight_decay,
+                "lr": self.args.crf_lr,
+            },
+            {
+                "params": [
+                    p for n, p in crf_param_optimizer if any(nd in n for nd in no_decay)
+                ],
+                "weight_decay": 0.0,
+                "lr": self.args.crf_lr,
+            },
+            {
+                "params": [
+                    p
+                    for n, p in linear_param_optimizer
+                    if not any(nd in n for nd in no_decay)
+                ],
+                "weight_decay": self.args.weight_decay,
+                "lr": self.args.crf_lr,
+            },
+            {
+                "params": [
+                    p
+                    for n, p in linear_param_optimizer
+                    if any(nd in n for nd in no_decay)
+                ],
+                "weight_decay": 0.0,
                 "lr": self.args.crf_lr,
             },
         ]

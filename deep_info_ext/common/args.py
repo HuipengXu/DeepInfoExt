@@ -99,6 +99,9 @@ def get_default_parser():
     parser.add_argument("--eps", default=0.5, type=float, help="epsilon for fgm or pgd")
     parser.add_argument("--alpha", default=0.3, type=float, help="alpha for pgd")
     parser.add_argument(
+        "--max_grad_norm", default=5.0, type=float, help="max_grad_norm for clip"
+    )
+    parser.add_argument(
         "--seed", default=42, type=int, help="random seed for initialization"
     )
     parser.add_argument(

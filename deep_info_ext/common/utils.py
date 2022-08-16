@@ -1,6 +1,8 @@
 import os
 import math
 import json
+import time
+import wandb
 import random
 import logging
 import platform
@@ -15,6 +17,11 @@ import evaluate
 import torch.nn as nn
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
+
+
+LOCAL_RANK = int(os.getenv("LOCAL_RANK", -1))
+RANK = int(os.getenv("RANK", -1))
+WORLD_SIZE = int(os.getenv("WORLD_SIZE", 1))
 
 
 def json_load(path: str):
@@ -185,7 +192,9 @@ def set_logging(name=None, verbose=True):
     log = logging.getLogger(name)
     log.setLevel(level)
     handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    )
     handler.setLevel(level)
     log.addHandler(handler)
 
@@ -306,7 +315,43 @@ def torch_distributed_zero_first(local_rank: int):
 
 def smart_DDP(model, local_rank):
     # Model DDP creation with checks
-    if check_version(torch.__version__, '1.11.0'):
-        return DDP(model, device_ids=[local_rank], output_device=local_rank, static_graph=True)
+    if check_version(torch.__version__, "1.11.0"):
+        return DDP(
+            model, device_ids=[local_rank], output_device=local_rank, static_graph=True
+        )
     else:
         return DDP(model, device_ids=[local_rank], output_device=local_rank)
+
+
+def wandb_init(args):
+    args_save = vars(args)
+    wandb.init(
+        project=args.task_name,
+        entity=args.username,
+        config=args_save,
+        dir=args.output_dir,
+    )
+
+    run_name = wandb.run.name or str(time.time())
+    args.output_dir = os.path.join(args.output_dir, run_name)
+    os.makedirs(args.output_dir)
+    args_save = json.dumps(
+        args_save, ensure_ascii=False, indent=2, default=str, sort_keys=True
+    )
+    LOGGER.info(f"Args:\n{args_save}")
+
+
+def ddp_init(args):
+    if args.do_train == 0:
+        assert LOCAL_RANK == -1, "Predict don't use DDP."
+
+    if LOCAL_RANK != -1 and args.do_train == 1:
+        assert (
+            args.batch_size % WORLD_SIZE == 0
+        ), f"--batch-size {args.batch_size} must be multiple of WORLD_SIZE"
+        assert (
+            torch.cuda.device_count() > LOCAL_RANK
+        ), "insufficient CUDA devices for DDP command"
+        torch.cuda.set_device(LOCAL_RANK)
+        args.device = torch.device("cuda", LOCAL_RANK)
+        dist.init_process_group(backend="nccl" if dist.is_nccl_available() else "gloo")
