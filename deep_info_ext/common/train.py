@@ -1,3 +1,4 @@
+from chunk import Chunk
 import os
 import wandb
 import prettytable as pt
@@ -20,52 +21,44 @@ class Trainer:
         model: PreTrainedModel,
         train_dataloader: DataLoader,
         dev_dataloader: DataLoader,
-        label_mapping: Optional[dict] = None,
+        label_mapping: dict,
     ):
         self.args = args
         self.model = model
         self.train_dataloader = train_dataloader
         self.dev_dataloader = dev_dataloader
         self.monitor_metric = 0.0
-        if label_mapping:
-            self.id2label = {id_: label for label, id_ in label_mapping.items()}
+        self.id2label = {id_: label for label, id_ in label_mapping.items()}
+        self.metric = ChunkEvaluator(self.id2label)
 
     @torch.no_grad()
-    def evaluation(self):
+    def evaluate(self):
         self.model.eval()
-        predictions = []
-        labels = []
+        self.metric.reset()
         val_loss = 0.0
         val_iterator = tqdm(
-            self.dev_dataloader, desc="Evaluation", total=len(self.dev_dataloader)
+            self.dev_dataloader, desc="Evaluating", total=len(self.dev_dataloader)
         )
 
         for batch in val_iterator:
-            batch_labels = [
-                [
-                    self.id2label[label] for label in label_seq[1:-1]
-                ]  # exclude cls and sep
-                for label_seq in batch["labels"].numpy()
-            ]
-            labels.extend(batch_labels)
+            lengths = batch["attention_mask"].sum(dim=-1).numpy()
             batch_cuda = {
                 item: value.to(self.args.device) for item, value in list(batch.items())
             }
-            loss, logits = self.model(**batch_cuda)[:2]
-            probs = torch.softmax(logits, dim=-1)
+            loss, predictions = self.model(**batch_cuda)[:2]
 
             if self.args.ngpus > 1:
                 loss = loss.mean()
 
             val_loss += loss.item()
-            batch_predictions = [
-                [self.id2label[pred] for pred in pred_seq[1:-1]]
-                for pred_seq in probs.argmax(dim=-1).cpu().numpy()
-            ]
-            predictions.extend(batch_predictions)
+
+            n_infer, n_label, n_correct = self.metric.compute(
+                lengths, predictions, batch["labels"]
+            )
+            self.metric.update(n_infer, n_label, n_correct)
 
         avg_val_loss = val_loss / len(self.dev_dataloader)
-        p, r, f1, acc = get_seqeuence_labeling_metrics(labels, predictions)
+        p, r, f1, acc = self.metric.accumulate()
         return {"p": p, "r": r, "f1": f1, "acc": acc, "avg_val_loss": avg_val_loss}
 
     def train(self):  # sourcery skip: low-code-quality
@@ -147,7 +140,7 @@ class Trainer:
 
                     if ema:
                         ema.apply_shadow()
-                    metrics = self.evaluation()
+                    metrics = self.evaluate()
                     metrics["avg_train_loss"] = avg_train_loss
 
                     self.save_and_log(global_steps, metrics)

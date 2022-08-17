@@ -50,6 +50,12 @@ def get_default_parser():
         help="dev data ratio in total train data",
     )
     parser.add_argument(
+        "--debug_ratio",
+        default=0.01,
+        type=float,
+        help="debug data ratio in total data",
+    )
+    parser.add_argument(
         "--num_workers",
         default=2,
         type=int,

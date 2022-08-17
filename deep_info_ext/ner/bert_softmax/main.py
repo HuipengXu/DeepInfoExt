@@ -3,8 +3,9 @@ from argparse import Namespace
 
 import torch
 import torch.distributed as dist
-from transformers import BertTokenizerFast, BertConfig, BertForTokenClassification
+from transformers import BertTokenizerFast, BertConfig
 
+from .model import BertForNER
 from ...common.train import Trainer
 from ...common.predict import Predictor
 from ...common.args import get_default_parser
@@ -31,7 +32,7 @@ def do_train(args: Namespace, data_module: BaseDataModule, config: BertConfig):
     if RANK in {-1, 0}:
         wandb_init(args)
 
-    model = BertForTokenClassification.from_pretrained(args.model_path, config=config)
+    model = BertForNER.from_pretrained(args.model_path, config=config)
 
     train_dataloader = data_module.create_dataloader(
         data_cache=data_module.train_cache, shuffle=True, rank=LOCAL_RANK
@@ -59,7 +60,7 @@ def do_predict(args: Namespace, data_module: BaseDataModule, config: BertConfig)
     test_dataloader = data_module.create_dataloader(
         data_cache=data_module.test_cache, shuffle=False, rank=-1
     )
-    model = BertForTokenClassification.from_pretrained(
+    model = BertForNER.from_pretrained(
         args.save_model_path, config=config
     )
     predictor = Predictor(args, model, test_dataloader, data_module.label_mapping)

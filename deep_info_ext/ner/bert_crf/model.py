@@ -21,7 +21,7 @@ class BertWithCRF(BertPreTrainedModel):
             attention_mask=attention_mask,
             output_hidden_states=True,
         )
-        sequence_output = outputs[2][-6]  # crf 可以得到一个稍微好一点的结果
+        sequence_output = outputs[2][-1]
         sequence_output = self.dropout(sequence_output)
         logits = self.linear(sequence_output)
         loss = None
@@ -31,4 +31,6 @@ class BertWithCRF(BertPreTrainedModel):
                 logits, labels, attention_mask.bool(), reduction="token_mean"
             )
             outputs[0] = loss
+        if not self.training:
+            outputs[1] = self.crf.decode(logits, mask=attention_mask.bool())
         return outputs

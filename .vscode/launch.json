@@ -2,26 +2,40 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python: Current File",
+            "name": "Python: -m deep_info_ext.ner.bert_softmax.main --overwrite 1 --debug 1 --debug_ratio 0.01 --max_seq_length 256 --device 0 --do_train 1 --num_train_epochs 3 --data_dir data --train_file msra_train_bio.txt --test_file msra_test_bio.txt --num_train_examples 45000 --num_test_examples 3442",
             "type": "python",
             "request": "launch",
-            "program": "${file}",
+            "program": "-m",
+            "env": {},
             "console": "integratedTerminal",
-            "justMyCode": true,
             "args": [
-                "--seed",
-                "22",
-                "--max_seq_length",
-                "128",
-                "--do_train",
-                "0",
-                "--device",
-                "cuda",
+                "deep_info_ext.ner.bert_crf.main",
+                "--overwrite",
+                "1",
                 "--debug",
                 "1",
-                "--overwrite",
-                "0"
-            ]
+                "--debug_ratio",
+                "0.01",
+                "--max_seq_length",
+                "256",
+                "--device",
+                "0",
+                "--do_train",
+                "1",
+                "--num_train_epochs",
+                "3",
+                "--data_dir",
+                "data",
+                "--train_file",
+                "msra_train_bio.txt",
+                "--test_file",
+                "msra_test_bio.txt",
+                "--num_train_examples",
+                "45000",
+                "--num_test_examples",
+                "3442"
+            ],
+            "cwd": "/home/xuhuipeng/ner"
         }
     ]
 }

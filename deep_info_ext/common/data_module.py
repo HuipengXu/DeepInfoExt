@@ -121,7 +121,7 @@ class BaseDataModule:
 
     def setup(self):
         label_mapping_path = os.path.join(self.args.data_dir, "label_mapping.json")
-        if os.path.exists(self.train_cache_path):
+        if not self.args.overwrite and os.path.exists(self.train_cache_path):
             self.label_mapping = json_load(label_mapping_path)
         if self.args.overwrite or not os.path.exists(self.train_cache_path):
             self.prepare()
@@ -206,7 +206,7 @@ class NERDataModule(BaseDataModule):
             ), f"Read data incorrectly, {len(examples)}:{num_examples}"
 
             if self.args.debug:
-                examples = examples[: int(0.01 * len(examples))]
+                examples = examples[: int(self.args.debug_ratio * len(examples))]
 
             for ex in tqdm(
                 examples, desc="Preprocessing raw data", total=len(examples)
@@ -220,11 +220,14 @@ class NERDataModule(BaseDataModule):
                         word, tag = items
                     else:
                         cnt += 1
-                        word = items[0]
+                        word = "，"
                         tag = "O"
                     words.append(word)
                     tags.append(tag)
                 text = "".join(words)
+                assert len(text) == len(
+                    tags
+                ), f"words: {len(words)}, text: {len(text)}, tags: {len(tags)} text length must equal to tag's"
                 data["texts"].append(text)
                 data["tags"].append(tags)
                 data["raw_examples"].append(ex)
@@ -281,6 +284,7 @@ class NERDataModule(BaseDataModule):
         )
 
     def merge_tag(self, text, tag, offset_mapping):
+        assert len(text) == len(tag), "text length must equal to tag's"
         merged_tag = []
         for offset in offset_mapping:
             span_tag = []
@@ -350,6 +354,7 @@ class NERCollator(Collator):
         input_ids_list, token_type_ids_list, labels_list = list(zip(*examples))
         max_seq_len = max(len(input_id) for input_id in input_ids_list)
         max_seq_len = min(max_seq_len, self.max_seq_len)
+        # lengths = [min(self.max_seq_len - 2, len(input_id) - 2) for input_id in input_ids_list]
         input_ids, token_type_ids, attention_mask = self.pad_and_truncate(
             input_ids_list, token_type_ids_list, max_seq_len
         )
