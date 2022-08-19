@@ -1,4 +1,3 @@
-from chunk import Chunk
 import os
 import wandb
 import prettytable as pt
@@ -52,10 +51,7 @@ class Trainer:
 
             val_loss += loss.item()
 
-            n_infer, n_label, n_correct = self.metric.compute(
-                lengths, predictions, batch["labels"]
-            )
-            self.metric.update(n_infer, n_label, n_correct)
+            self.metric.update(lengths, predictions, batch["labels"])
 
         avg_val_loss = val_loss / len(self.dev_dataloader)
         p, r, f1, acc = self.metric.accumulate()

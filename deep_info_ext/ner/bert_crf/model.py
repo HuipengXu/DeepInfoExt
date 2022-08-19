@@ -1,7 +1,8 @@
+import torch
 import torch.nn as nn
-from torchcrf import CRF
 from transformers import BertPreTrainedModel, BertModel
 
+from ...common.crf import CRF
 
 class BertWithCRF(BertPreTrainedModel):
     def __init__(self, config):
@@ -33,4 +34,5 @@ class BertWithCRF(BertPreTrainedModel):
             outputs[0] = loss
         if not self.training:
             outputs[1] = self.crf.decode(logits, mask=attention_mask.bool())
+            outputs[1] = torch.tensor(outputs[1], device=input_ids.device)
         return outputs

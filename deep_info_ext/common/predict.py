@@ -7,7 +7,7 @@ import torch
 from torch.utils.data import DataLoader
 from transformers import PreTrainedModel
 
-from .utils import json_load, get_seqeuence_labeling_metrics, LOGGER
+from .utils import LOGGER, ChunkEvaluator
 
 
 class Predictor:
@@ -22,6 +22,7 @@ class Predictor:
         self.test_raw_path = os.path.join(args.data_dir, args.test_file)
         self.test_dataloader = test_dataloader
         self.id2label = {id_: label for label, id_ in label_mapping.items()}
+        self.metric = ChunkEvaluator(self.id2label)
         self.model = model.to(args.device)
         self.model.eval()
 
@@ -35,6 +36,7 @@ class Predictor:
         )
 
         for batch in test_iterator:
+            lengths = batch["attention_mask"].sum(dim=-1).numpy()
             batch_labels = [
                 [self.id2label[label] for label in label_seq[1:-1]]
                 for label_seq in batch["labels"].numpy()
@@ -43,21 +45,22 @@ class Predictor:
             batch_cuda = {
                 item: value.to(self.args.device) for item, value in list(batch.items())
             }
-            loss, logits = self.model(**batch_cuda)[:2]
-            probs = torch.softmax(logits, dim=-1)
+            loss, batch_predictions = self.model(**batch_cuda)[:2]
 
             if self.args.ngpus > 1:
                 loss = loss.mean()
 
             test_loss += loss.item()
+            self.metric.update(lengths, batch_predictions, batch["labels"])
+
             batch_predictions = [
                 [self.id2label[pred] for pred in pred_seq[1:-1]]
-                for pred_seq in probs.argmax(dim=-1).cpu().numpy()
+                for pred_seq in batch_predictions.cpu().numpy()
             ]
             predictions.extend(batch_predictions)
 
         avg_test_loss = test_loss / len(self.test_dataloader)
-        p, r, f1, acc = get_seqeuence_labeling_metrics(labels, predictions)
+        p, r, f1, acc = self.metric.accumulate()
         metrics = {"p": p, "r": r, "f1": f1, "acc": acc, "avg_test_loss": avg_test_loss}
 
         self.save_bad_cases(predictions, labels)
