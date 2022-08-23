@@ -1,5 +1,7 @@
 import os
+import sys
 import pickle
+import traceback
 from tqdm import tqdm
 from argparse import Namespace
 from dataclasses import dataclass
@@ -240,7 +242,7 @@ class NERDataModule(BaseDataModule):
         texts = data["texts"]
         tags = data["tags"]
         raw_examples = data["raw_examples"]
-        tag_set = {t for tag in tags for t in tag}
+        tag_set = sorted({t for tag in tags for t in tag})
 
         if not self.label_mapping:
             self.label_mapping = {tag: i for i, tag in enumerate(tag_set)}
@@ -248,11 +250,22 @@ class NERDataModule(BaseDataModule):
             json_dump(label_mapping_path, self.label_mapping)
 
         encoded_data = []
+        problem_data = []
         for raw_example, text, tag in tqdm(
             zip(raw_examples, texts, tags), desc="Encoding", total=len(texts)
         ):
             example = self.encode_step(raw_example, text, tag)
-            encoded_data.append(example)
+            if isinstance(example, InputExample):
+                encoded_data.append(example)
+            else:
+                problem_data.append(raw_example)
+
+        if problem_data:
+            problem_data_path = os.path.join(self.args.data_dir, "problem_data.txt")
+            with open(problem_data_path, "a+", encoding="utf8") as f:
+                f.write("*" * 50 + "\n")
+                f.write("\n\n".join(problem_data))
+            LOGGER.info(f"Problem data have been write to {problem_data_path}.")
 
         return encoded_data
 
@@ -268,14 +281,19 @@ class NERDataModule(BaseDataModule):
         )
 
         offset_mapping = inputs.offset_mapping[1:-1]
-        merged_tag = self.merge_tag(text, tag, offset_mapping)
+        merged_tag, cut_error = self.merge_tag(text, tag, offset_mapping)
         assert len(merged_tag) == len(
             inputs.input_ids
         ), "Label's length must be equal to input's length"
 
-        tag_ids = [self.label_mapping[t] for t in merged_tag]
+        try:
+            tag_ids = [self.label_mapping[t] for t in merged_tag]
+        except KeyError:
+            LOGGER.info(traceback.format_exc())
+            LOGGER.info("Maybe your debug ratio is to low, try to scale it up a little")
+            sys.exit(1)
 
-        return InputExample(
+        return cut_error or InputExample(
             inputs.input_ids,
             inputs.token_type_ids,
             tag_ids,
@@ -286,9 +304,11 @@ class NERDataModule(BaseDataModule):
     def merge_tag(self, text, tag, offset_mapping):
         assert len(text) == len(tag), "text length must equal to tag's"
         merged_tag = []
+        cut_error = False
         for offset in offset_mapping:
             span_tag = []
-            for i in range(offset[0], offset[-1]):
+            start, end = offset[0], offset[-1]
+            for i in range(start, end):
                 if not span_tag or tag[i] != span_tag[-1]:
                     span_tag.append(tag[i])
             if len(span_tag) == 1:
@@ -300,9 +320,8 @@ class NERDataModule(BaseDataModule):
             ):
                 cur_tag = span_tag[0]
             else:
-                LOGGER.info(
-                    f"Entity is cut error: {text[:offset[0]]}-{text[offset[0]:offset[-1]]}-{text[offset[-1]:]}"
-                )
+                LOGGER.info(f"Entity is cut error! error segment: {text[start: end]}")
+                cut_error = True
                 cur_tag = "O"
 
             if cur_tag.startswith("I") and merged_tag and merged_tag[-1] == "O":
@@ -310,7 +329,7 @@ class NERDataModule(BaseDataModule):
             merged_tag.append(cur_tag)
 
         merged_tag = ["O"] + merged_tag + ["O"]
-        return merged_tag
+        return merged_tag, cut_error
 
     def prepare(self):
         train_data_path = os.path.join(self.args.data_dir, self.args.train_file)

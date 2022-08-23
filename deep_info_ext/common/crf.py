@@ -1,4 +1,4 @@
-"""copy frmo https://github.com/kmkurn/pytorch-crf"""
+"""copy from https://github.com/kmkurn/pytorch-crf"""
 from typing import List, Optional
 
 import torch

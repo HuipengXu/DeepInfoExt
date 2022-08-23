@@ -426,6 +426,7 @@ def select_device(device="", batch_size=0, newline=True):
             device.replace(",", "")
         ), f"Invalid CUDA '--device {device}' requested, use '--device cpu' or pass valid CUDA device(s)"
 
+    space = " " * (len(s) + 1)
     if not (cpu or mps) and torch.cuda.is_available():  # prefer GPU if available
         devices = (
             device.split(",") if device else "0"
@@ -435,7 +436,6 @@ def select_device(device="", batch_size=0, newline=True):
             assert (
                 batch_size % n == 0
             ), f"batch-size {batch_size} not multiple of GPU count {n}"
-        space = " " * (len(s) + 1)
         for i, d in enumerate(devices):
             p = torch.cuda.get_device_properties(i)
             s += f"{space}CUDA:{d} ({p.name}, {p.total_memory / (1 << 20):.0f}MiB)\n"  # bytes to MB
@@ -443,10 +443,10 @@ def select_device(device="", batch_size=0, newline=True):
     elif (
         mps and getattr(torch, "has_mps", False) and torch.backends.mps.is_available()
     ):  # prefer MPS if available
-        s += "MPS\n"
+        s += f"{space}MPS\n"
         arg = "mps"
     else:  # revert to CPU
-        s += "CPU\n"
+        s += f"{space}CPU\n"
         arg = "cpu"
 
     if not newline:
